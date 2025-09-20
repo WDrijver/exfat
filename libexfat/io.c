@@ -391,9 +391,23 @@ ssize_t exfat_generic_pread(const struct exfat* ef, struct exfat_node* node,
 		void* buffer, size_t size, off_t offset)
 {
 	uint64_t uoffset = offset;
-	cluster_t cluster;
 	char* bufp = buffer;
-	off_t lsize, loffset, remainder;
+	ssize_t bytes = 0;
+
+	/*
+		Possible read request scenarios:
+
+		0                   valid_size     size
+		[=======================|            ]
+		  |   |_________|  |_________|  |_________|  |  |_________|
+		  |       (1)          (2)          (3)      |      (4)
+		  |__________________________________________|
+		                       (5)
+
+		In scenarios (2), (3), and (5), part of the output buffer needs to be
+		zeroed out because the request crosses the "valid_size" or "size"
+		boundary.
+	*/
 
 	if (offset < 0)
 		return -EINVAL;
@@ -402,53 +416,58 @@ ssize_t exfat_generic_pread(const struct exfat* ef, struct exfat_node* node,
 	if (size == 0)
 		return 0;
 
-	if (uoffset + size > node->valid_size)
+	/* read data from the disk if we need to */
+	if (uoffset < node->valid_size)
 	{
-		ssize_t bytes = 0;
+		cluster_t cluster;
+		off_t lsize, loffset, remainder;
 
-		if (uoffset < node->valid_size)
-		{
-			bytes = exfat_generic_pread(ef, node, buffer,
-					node->valid_size - uoffset, offset);
-			if (bytes < 0 || (size_t) bytes < node->valid_size - uoffset)
-				return bytes;
-		}
-		memset(buffer + bytes, 0,
-				MIN(size - bytes, node->size - node->valid_size));
-		return MIN(size, node->size - uoffset);
-	}
-
-	cluster = exfat_advance_cluster(ef, node, uoffset / CLUSTER_SIZE(*ef->sb));
-	if (CLUSTER_INVALID(*ef->sb, cluster))
-	{
-		exfat_error("invalid cluster 0x%x while reading", cluster);
-		return -EIO;
-	}
-
-	loffset = uoffset % CLUSTER_SIZE(*ef->sb);
-	remainder = MIN(size, node->size - uoffset);
-	while (remainder > 0)
-	{
+		cluster = exfat_advance_cluster(ef, node,
+				uoffset / CLUSTER_SIZE(*ef->sb));
 		if (CLUSTER_INVALID(*ef->sb, cluster))
 		{
 			exfat_error("invalid cluster 0x%x while reading", cluster);
 			return -EIO;
 		}
-		lsize = MIN(CLUSTER_SIZE(*ef->sb) - loffset, remainder);
-		if (exfat_pread(ef->dev, bufp, lsize,
-					exfat_c2o(ef, cluster) + loffset) < 0)
+
+		loffset = uoffset % CLUSTER_SIZE(*ef->sb);
+		remainder = MIN(size, node->valid_size - uoffset);
+		while (remainder > 0)
 		{
-			exfat_error("failed to read cluster %#x", cluster);
-			return -EIO;
+			if (CLUSTER_INVALID(*ef->sb, cluster))
+			{
+				exfat_error("invalid cluster 0x%x while reading", cluster);
+				return -EIO;
+			}
+			lsize = MIN(CLUSTER_SIZE(*ef->sb) - loffset, remainder);
+			if (exfat_pread(ef->dev, bufp, lsize,
+						exfat_c2o(ef, cluster) + loffset) < 0)
+			{
+				exfat_error("failed to read cluster %#x", cluster);
+				return -EIO;
+			}
+			bufp += lsize;
+			loffset = 0;
+			remainder -= lsize;
+			cluster = exfat_next_cluster(ef, node, cluster);
 		}
-		bufp += lsize;
-		loffset = 0;
-		remainder -= lsize;
-		cluster = exfat_next_cluster(ef, node, cluster);
+		bytes = MIN(size, node->valid_size - uoffset) - remainder;
 	}
+
+	/* zero out the bytes from "valid_size" to "size" */
+	if (uoffset < node->size)
+	{
+		off_t remainder;
+
+		remainder = MIN(size - bytes, node->size - node->valid_size);
+		memset(bufp, 0, remainder);
+		bytes += remainder;
+	}
+
 	if (!(node->attrib & EXFAT_ATTRIB_DIR) && !ef->ro && !ef->noatime)
 		exfat_update_atime(node);
-	return MIN(size, node->size - uoffset) - remainder;
+
+	return bytes;
 }
 
 ssize_t exfat_generic_pwrite(struct exfat* ef, struct exfat_node* node,
