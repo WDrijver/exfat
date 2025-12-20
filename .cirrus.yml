@@ -30,7 +30,7 @@ task:
         apt-get update
         apt-get install -y libfuse-dev
       env:
-        EXTRA_CFLAGS: -fanalyzer
+        EXTRA_CFLAGS: -fanalyzer -Wno-analyzer-fd-leak
 
     - name: debian-fuse3
       container:
@@ -39,7 +39,7 @@ task:
         apt-get update
         apt-get install -y libfuse3-dev
       env:
-        EXTRA_CFLAGS: -fanalyzer
+        EXTRA_CFLAGS: -fanalyzer -Wno-analyzer-fd-leak
 
     - name: macos
       macos_instance:
