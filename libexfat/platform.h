@@ -24,6 +24,8 @@
 #ifndef PLATFORM_H_INCLUDED
 #define PLATFORM_H_INCLUDED
 
+#include <stdint.h>
+
 #if defined(__linux__) || defined(__GLIBC__) || defined(__GNU__)
 
 #include <endian.h>
@@ -56,6 +58,23 @@
 #define EXFAT_LITTLE_ENDIAN _LITTLE_ENDIAN
 #define EXFAT_BIG_ENDIAN _BIG_ENDIAN
 
+#elif defined(__amigaos__) || defined(AMIGA)
+
+/* AmigaOS / m68k (ApolloCrossDev GCC).  The 68k is big-endian and the
+   toolchain ships no <endian.h>, so define the byte order directly and use
+   the GCC builtins for the swaps.  See docs/fs/exfat-on-disk-format.md. */
+#define EXFAT_LITTLE_ENDIAN 1234
+#define EXFAT_BIG_ENDIAN    4321
+#define EXFAT_BYTE_ORDER    EXFAT_BIG_ENDIAN
+#define exfat_bswap16(x) __builtin_bswap16(x)
+#define exfat_bswap32(x) __builtin_bswap32(x)
+#define exfat_bswap64(x) __builtin_bswap64(x)
+
+/* AmigaOS off_t is 32 bits (typedef long _off_t), which would silently
+   corrupt any volume or file beyond 2 GB.  libexfat uses its own 64-bit
+   offset type instead; see projects/exfat/CLAUDE.md. */
+typedef int64_t exfat_off_t;
+
 #elif defined(__sun)
 
 #include <endian.h>
@@ -68,6 +87,14 @@
 
 #else 
 #error Unknown platform
+#endif
+
+#ifndef EXFAT_OFF_T_DEFINED
+#define EXFAT_OFF_T_DEFINED
+#if !defined(__amigaos__) && !defined(AMIGA)
+#include <sys/types.h>
+typedef off_t exfat_off_t;
+#endif
 #endif
 
 #endif /* ifndef PLATFORM_H_INCLUDED */

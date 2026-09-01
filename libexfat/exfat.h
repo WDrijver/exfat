@@ -63,9 +63,9 @@
 #define EXFAT_REPAIR(hook, ef, ...) \
 	(exfat_ask_to_fix(ef) && exfat_fix_ ## hook(ef, __VA_ARGS__))
 
-/* The size of off_t type must be 64 bits. File systems larger than 2 GB will
-   be corrupted with 32-bit off_t. */
-STATIC_ASSERT(sizeof(off_t) == 8);
+/* The size of exfat_off_t type must be 64 bits. File systems larger than 2 GB will
+   be corrupted with 32-bit exfat_off_t. */
+STATIC_ASSERT(sizeof(exfat_off_t) == 8);
 
 struct exfat_node
 {
@@ -77,7 +77,7 @@ struct exfat_node
 	int references;
 	uint32_t fptr_index;
 	cluster_t fptr_cluster;
-	off_t entry_offset;
+	exfat_off_t entry_offset;
 	cluster_t start_cluster;
 	uint16_t attrib;
 	uint8_t continuations;
@@ -150,18 +150,18 @@ struct exfat_dev* exfat_open(const char* spec, enum exfat_mode mode);
 int exfat_close(struct exfat_dev* dev);
 int exfat_fsync(struct exfat_dev* dev);
 enum exfat_mode exfat_get_mode(const struct exfat_dev* dev);
-off_t exfat_get_size(const struct exfat_dev* dev);
-off_t exfat_seek(struct exfat_dev* dev, off_t offset, int whence);
+exfat_off_t exfat_get_size(const struct exfat_dev* dev);
+exfat_off_t exfat_seek(struct exfat_dev* dev, exfat_off_t offset, int whence);
 ssize_t exfat_read(struct exfat_dev* dev, void* buffer, size_t size);
 ssize_t exfat_write(struct exfat_dev* dev, const void* buffer, size_t size);
 ssize_t exfat_pread(struct exfat_dev* dev, void* buffer, size_t size,
-		off_t offset);
+		exfat_off_t offset);
 ssize_t exfat_pwrite(struct exfat_dev* dev, const void* buffer, size_t size,
-		off_t offset);
+		exfat_off_t offset);
 ssize_t exfat_generic_pread(const struct exfat* ef, struct exfat_node* node,
-		void* buffer, size_t size, off_t offset);
+		void* buffer, size_t size, exfat_off_t offset);
 ssize_t exfat_generic_pwrite(struct exfat* ef, struct exfat_node* node,
-		const void* buffer, size_t size, off_t offset);
+		const void* buffer, size_t size, exfat_off_t offset);
 
 int exfat_opendir(struct exfat* ef, struct exfat_node* dir,
 		struct exfat_iterator* it);
@@ -172,7 +172,7 @@ int exfat_lookup(struct exfat* ef, struct exfat_node** node,
 int exfat_split(struct exfat* ef, struct exfat_node** parent,
 		struct exfat_node** node, le16_t* name, const char* path);
 
-off_t exfat_c2o(const struct exfat* ef, cluster_t cluster);
+exfat_off_t exfat_c2o(const struct exfat* ef, cluster_t cluster);
 cluster_t exfat_next_cluster(const struct exfat* ef,
 		const struct exfat_node* node, cluster_t cluster);
 cluster_t exfat_advance_cluster(const struct exfat* ef,
@@ -182,7 +182,7 @@ int exfat_flush(struct exfat* ef);
 int exfat_truncate(struct exfat* ef, struct exfat_node* node, uint64_t size,
 		bool erase);
 uint32_t exfat_count_free_clusters(const struct exfat* ef);
-int exfat_find_used_sectors(const struct exfat* ef, off_t* a, off_t* b);
+int exfat_find_used_sectors(const struct exfat* ef, exfat_off_t* a, exfat_off_t* b);
 
 void exfat_stat(const struct exfat* ef, const struct exfat_node* node,
 		struct stat* stbuf);
@@ -239,6 +239,6 @@ bool exfat_fix_invalid_vbr_checksum(const struct exfat* ef, void* sector,
 bool exfat_fix_invalid_node_checksum(const struct exfat* ef,
 		struct exfat_node* node);
 bool exfat_fix_unknown_entry(struct exfat* ef, struct exfat_node* dir,
-		const struct exfat_entry* entry, off_t offset);
+		const struct exfat_entry* entry, exfat_off_t offset);
 
 #endif /* ifndef EXFAT_H_INCLUDED */

@@ -22,6 +22,91 @@
 
 #include "exfat.h"
 #include <stdarg.h>
+
+#if defined(__amigaos__) || defined(AMIGA)
+
+/* AmigaOS: there is no stdout/stderr in a file system process, so route the
+   library's diagnostics through the ApolloCrossDev debug facility (serial /
+   RawPutChar), the same one sagasd.device uses.  Upstream's printf-style
+   format strings are rendered with vsnprintf() first because RawDoFmt() is
+   not printf-compatible (it wants %ld where C wants %d). */
+
+#include <proto/exec.h>
+#include "ApolloCrossDev_Debug.h"	/* docs/toolchain/_ApolloLib, via -I */
+
+/* A ROM-resident handler may have no writable static data at all.  The
+   counter is only ever read by fsck and dump, neither of which is part of
+   this build, so drop it rather than keep a word of BSS. */
+#define exfat_errors_bump()	((void)0)
+
+int exfat_amiga_vsnprintf(char* buf, size_t size, const char* fmt, va_list ap);
+
+/* The render buffer is a caller's local, not a static: several handler
+   processes share this file's data when the handler is resident in
+   FileSystem.resource, and a shared buffer would interleave their messages.
+   UNUSED because at DEBUG=0 every Debug_* macro expands to nothing. */
+#define EXFAT_LOGBUF_SIZE 512
+
+static UNUSED const char* exfat_render(char* buf, const char* format,
+		va_list ap)
+{
+	exfat_amiga_vsnprintf(buf, EXFAT_LOGBUF_SIZE, format, ap);
+	return buf;
+}
+
+void exfat_bug(const char* format, ...)
+{
+	UNUSED char buf[EXFAT_LOGBUF_SIZE];
+	va_list ap;
+
+	va_start(ap, format);
+	Debug_Error("BUG: %s", exfat_render(buf, format, ap));
+	va_end(ap);
+	/* No abort() without a C run-time, and taking the machine down would
+	   lose the serial log.  Stop this process instead; the volume becomes
+	   unresponsive but the system survives and the reason is on the wire. */
+	for (;;)
+	{
+		struct ExecBase* SysBase = *(struct ExecBase**)4UL;
+		Wait(0L);
+	}
+}
+
+void exfat_error(const char* format, ...)
+{
+	UNUSED char buf[EXFAT_LOGBUF_SIZE];
+	va_list ap;
+
+	exfat_errors_bump();
+	va_start(ap, format);
+	Debug_Error("%s", exfat_render(buf, format, ap));
+	va_end(ap);
+}
+
+void exfat_warn(const char* format, ...)
+{
+	UNUSED char buf[EXFAT_LOGBUF_SIZE];
+	va_list ap;
+
+	va_start(ap, format);
+	Debug_Warn("%s", exfat_render(buf, format, ap));
+	va_end(ap);
+}
+
+void exfat_debug(const char* format, ...)
+{
+	UNUSED char buf[EXFAT_LOGBUF_SIZE];
+	va_list ap;
+
+	va_start(ap, format);
+	Debug_Info("%s", exfat_render(buf, format, ap));
+	va_end(ap);
+}
+
+#else /* !AmigaOS - upstream POSIX implementation */
+
+#define exfat_errors_bump()	(exfat_errors++)
+
 #ifdef __ANDROID__
 #include <android/log.h>
 #else
@@ -65,7 +150,7 @@ void exfat_error(const char* format, ...)
 {
 	va_list ap, aq;
 
-	exfat_errors++;
+	exfat_errors_bump();
 	va_start(ap, format);
 	va_copy(aq, ap);
 
@@ -134,3 +219,5 @@ void exfat_debug(const char* format, ...)
 #endif
 	va_end(aq);
 }
+
+#endif /* !AmigaOS */

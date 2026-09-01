@@ -23,7 +23,27 @@
 #include "exfat.h"
 #include <strings.h>
 
+#if defined(__amigaos__) || defined(AMIGA)
+/* No writable static data: see libexfat/log.c.  Nothing in the handler reads
+   this counter; it exists for fsck, which is not part of this build. */
+#define exfat_errors_fixed_bump()	((void)0)
+#else
 int exfat_errors_fixed;
+#define exfat_errors_fixed_bump()	(exfat_errors_fixed++)
+#endif
+
+#if defined(__amigaos__) || defined(AMIGA)
+
+/* The interactive repair prompt needs stdin, which a file system process
+   does not have.  On AmigaOS never offer to repair: a read-only mount must
+   not modify the volume. */
+bool exfat_ask_to_fix(const struct exfat* ef)
+{
+	(void) ef;
+	return false;
+}
+
+#else
 
 bool exfat_ask_to_fix(const struct exfat* ef)
 {
@@ -60,11 +80,13 @@ bool exfat_ask_to_fix(const struct exfat* ef)
 	exfat_bug("invalid repair option value: %d", ef->repair);
 }
 
+#endif /* !AmigaOS */
+
 bool exfat_fix_invalid_vbr_checksum(const struct exfat* ef, void* sector,
 		uint32_t vbr_checksum)
 {
 	size_t i;
-	off_t sector_size = SECTOR_SIZE(*ef->sb);
+	exfat_off_t sector_size = SECTOR_SIZE(*ef->sb);
 
 	for (i = 0; i < sector_size / sizeof(vbr_checksum); i++)
 		((le32_t*) sector)[i] = cpu_to_le32(vbr_checksum);
@@ -73,7 +95,7 @@ bool exfat_fix_invalid_vbr_checksum(const struct exfat* ef, void* sector,
 		exfat_error("failed to write correct VBR checksum");
 		return false;
 	}
-	exfat_errors_fixed++;
+	exfat_errors_fixed_bump();
 	return true;
 }
 
@@ -83,12 +105,12 @@ bool exfat_fix_invalid_node_checksum(UNUSED const struct exfat* ef,
 	/* checksum will be rewritten by exfat_flush_node() */
 	node->is_dirty = true;
 
-	exfat_errors_fixed++;
+	exfat_errors_fixed_bump();
 	return true;
 }
 
 bool exfat_fix_unknown_entry(struct exfat* ef, struct exfat_node* dir,
-		const struct exfat_entry* entry, off_t offset)
+		const struct exfat_entry* entry, exfat_off_t offset)
 {
 	struct exfat_entry deleted = *entry;
 
@@ -97,6 +119,6 @@ bool exfat_fix_unknown_entry(struct exfat* ef, struct exfat_node* dir,
 			offset) != sizeof(struct exfat_entry))
 		return false;
 
-	exfat_errors_fixed++;
+	exfat_errors_fixed_bump();
 	return true;
 }

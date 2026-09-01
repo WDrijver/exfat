@@ -26,12 +26,12 @@
 #include "rootdir.h"
 #include <unistd.h>
 
-static off_t fat_alignment(void)
+static exfat_off_t fat_alignment(void)
 {
-	return (off_t) 128 * get_sector_size();
+	return (exfat_off_t) 128 * get_sector_size();
 }
 
-static off_t fat_size(void)
+static exfat_off_t fat_size(void)
 {
 	return get_volume_size() / get_cluster_size() * sizeof(cluster_t);
 }

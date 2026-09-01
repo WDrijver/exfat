@@ -25,6 +25,6 @@
 
 #include <stdint.h>
 
-extern uint8_t upcase_table[5836];
+extern const uint8_t upcase_table[5836];
 
 #endif /* ifndef MKFS_UCTC_H_INCLUDED */

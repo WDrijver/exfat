@@ -78,7 +78,7 @@ int exfat_cleanup_node(struct exfat* ef, struct exfat_node* node)
 }
 
 static int read_entries(struct exfat* ef, struct exfat_node* dir,
-		struct exfat_entry* entries, int n, off_t offset)
+		struct exfat_entry* entries, int n, exfat_off_t offset)
 {
 	ssize_t size;
 
@@ -99,7 +99,7 @@ static int read_entries(struct exfat* ef, struct exfat_node* dir,
 }
 
 static int write_entries(struct exfat* ef, struct exfat_node* dir,
-		const struct exfat_entry* entries, int n, off_t offset)
+		const struct exfat_entry* entries, int n, exfat_off_t offset)
 {
 	ssize_t size;
 
@@ -334,7 +334,7 @@ static int parse_file_entries(struct exfat* ef, struct exfat_node* node,
 }
 
 static int parse_file_entry(struct exfat* ef, struct exfat_node* parent,
-		struct exfat_node** node, off_t* offset, int n)
+		struct exfat_node** node, exfat_off_t* offset, int n)
 {
 	struct exfat_entry entries[n];
 	int rc;
@@ -385,7 +385,7 @@ static void decompress_upcase(uint16_t* output, const le16_t* source,
  * structure.
  */
 static int readdir(struct exfat* ef, struct exfat_node* parent,
-		struct exfat_node** node, off_t* offset)
+		struct exfat_node** node, exfat_off_t* offset)
 {
 	int rc;
 	struct exfat_entry entry;
@@ -531,7 +531,7 @@ static int readdir(struct exfat* ef, struct exfat_node* parent,
 
 int exfat_cache_directory(struct exfat* ef, struct exfat_node* dir)
 {
-	off_t offset = 0;
+	exfat_off_t offset = 0;
 	int rc;
 	struct exfat_node* node;
 	struct exfat_node* current = NULL;
@@ -678,7 +678,7 @@ int exfat_flush_node(struct exfat* ef, struct exfat_node* node)
 }
 
 static int erase_entries(struct exfat* ef, struct exfat_node* dir, int n,
-		off_t offset)
+		exfat_off_t offset)
 {
 	struct exfat_entry entries[n];
 	int rc;
@@ -710,7 +710,7 @@ static int erase_node(struct exfat* ef, struct exfat_node* node)
 }
 
 static int shrink_directory(struct exfat* ef, struct exfat_node* dir,
-		off_t deleted_offset)
+		exfat_off_t deleted_offset)
 {
 	const struct exfat_node* node;
 	const struct exfat_node* last_node;
@@ -757,7 +757,7 @@ static int shrink_directory(struct exfat* ef, struct exfat_node* dir,
 static int delete(struct exfat* ef, struct exfat_node* node)
 {
 	struct exfat_node* parent = node->parent;
-	off_t deleted_offset = node->entry_offset;
+	exfat_off_t deleted_offset = node->entry_offset;
 	int rc;
 
 	exfat_get_node(parent);
@@ -804,7 +804,7 @@ int exfat_rmdir(struct exfat* ef, struct exfat_node* node)
 	return delete(ef, node);
 }
 
-static int check_slot(struct exfat* ef, struct exfat_node* dir, off_t offset,
+static int check_slot(struct exfat* ef, struct exfat_node* dir, exfat_off_t offset,
 		int n)
 {
 	struct exfat_entry entries[n];
@@ -827,7 +827,7 @@ static int check_slot(struct exfat* ef, struct exfat_node* dir, off_t offset,
 }
 
 static int find_slot(struct exfat* ef, struct exfat_node* dir,
-		off_t* offset, int n)
+		exfat_off_t* offset, int n)
 {
 	bitmap_t* dmap;
 	struct exfat_node* p;
@@ -856,7 +856,7 @@ static int find_slot(struct exfat* ef, struct exfat_node* dir,
 		if (BMAP_GET(dmap, i) == 0)
 		{
 			if (contiguous++ == 0)
-				*offset = (off_t) i * sizeof(struct exfat_entry);
+				*offset = (exfat_off_t) i * sizeof(struct exfat_entry);
 			if (contiguous == n)
 			{
 				int rc;
@@ -892,7 +892,7 @@ static int find_slot(struct exfat* ef, struct exfat_node* dir,
 }
 
 static int commit_entry(struct exfat* ef, struct exfat_node* dir,
-		const le16_t* name, off_t offset, uint16_t attrib)
+		const le16_t* name, exfat_off_t offset, uint16_t attrib)
 {
 	struct exfat_node* node;
 	const size_t name_length = exfat_utf16_length(name);
@@ -954,7 +954,7 @@ static int create(struct exfat* ef, const char* path, uint16_t attrib)
 {
 	struct exfat_node* dir;
 	struct exfat_node* existing;
-	off_t offset = -1;
+	exfat_off_t offset = -1;
 	le16_t name[EXFAT_NAME_MAX + 1];
 	int rc;
 
@@ -1023,7 +1023,7 @@ int exfat_mkdir(struct exfat* ef, const char* path)
 }
 
 static int rename_entry(struct exfat* ef, struct exfat_node* dir,
-		struct exfat_node* node, const le16_t* name, off_t new_offset)
+		struct exfat_node* node, const le16_t* name, exfat_off_t new_offset)
 {
 	const size_t name_length = exfat_utf16_length(name);
 	const int name_entries = DIV_ROUND_UP(name_length, EXFAT_ENAME_MAX);
@@ -1075,7 +1075,7 @@ int exfat_rename(struct exfat* ef, const char* old_path, const char* new_path)
 	struct exfat_node* node;
 	struct exfat_node* existing;
 	struct exfat_node* dir;
-	off_t offset = -1;
+	exfat_off_t offset = -1;
 	le16_t name[EXFAT_NAME_MAX + 1];
 	int rc;
 
@@ -1193,7 +1193,7 @@ const char* exfat_get_label(struct exfat* ef)
 	return ef->label;
 }
 
-static int find_label(struct exfat* ef, off_t* offset)
+static int find_label(struct exfat* ef, exfat_off_t* offset)
 {
 	struct exfat_entry entry;
 	int rc;
@@ -1213,7 +1213,7 @@ int exfat_set_label(struct exfat* ef, const char* label)
 {
 	le16_t label_utf16[EXFAT_ENAME_MAX + 1];
 	int rc;
-	off_t offset;
+	exfat_off_t offset;
 	struct exfat_entry_label entry;
 
 	memset(label_utf16, 0, sizeof(label_utf16));

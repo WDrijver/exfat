@@ -139,7 +139,11 @@ void exfat_humanize_bytes(uint64_t value, struct exfat_human_bytes* hb)
 	size_t i;
 	/* 16 EB (minus 1 byte) is the largest size that can be represented by
 	   uint64_t */
-	const char* units[] = {"bytes", "KB", "MB", "GB", "TB", "PB", "EB"};
+	/* AmigaOS port: "static const" rather than a local, so the array is not
+	   a writable initialiser template in DATA.  The handler must be a single
+	   read-only hunk to go in ROM - see amiga/entry.S. */
+	static const char* const units[] =
+			{"bytes", "KB", "MB", "GB", "TB", "PB", "EB"};
 	uint64_t divisor = 1;
 	uint64_t temp = 0;
 
@@ -158,12 +162,20 @@ void exfat_humanize_bytes(uint64_t value, struct exfat_human_bytes* hb)
 	hb->unit = units[i];
 }
 
+#if defined(__amigaos__) || defined(AMIGA)
+
+/* exfat_print_info() is only used by the dump/mkfs tools and needs stdio,
+   which a file system process has no run-time for.  Left out of the
+   AmigaOS build. */
+
+#else
+
 void exfat_print_info(const struct exfat_super_block* sb,
 		uint32_t free_clusters)
 {
 	struct exfat_human_bytes hb;
-	off_t total_space = le64_to_cpu(sb->sector_count) * SECTOR_SIZE(*sb);
-	off_t avail_space = (off_t) free_clusters * CLUSTER_SIZE(*sb);
+	exfat_off_t total_space = le64_to_cpu(sb->sector_count) * SECTOR_SIZE(*sb);
+	exfat_off_t avail_space = (exfat_off_t) free_clusters * CLUSTER_SIZE(*sb);
 
 	printf("File system version           %hhu.%hhu\n",
 			sb->version.major, sb->version.minor);
@@ -179,6 +191,8 @@ void exfat_print_info(const struct exfat_super_block* sb,
 	printf("Available space      %10"PRIu64" %s\n", hb.value, hb.unit);
 }
 
+#endif /* !AmigaOS */
+
 bool exfat_match_option(const char* options, const char* option_name)
 {
 	const char* p;
@@ -190,3 +204,5 @@ bool exfat_match_option(const char* options, const char* option_name)
 			return true;
 	return false;
 }
+
+

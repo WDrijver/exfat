@@ -27,23 +27,23 @@
 
 struct fs_object
 {
-	off_t (*get_alignment)(void);
-	off_t (*get_size)(void);
+	exfat_off_t (*get_alignment)(void);
+	exfat_off_t (*get_size)(void);
 	int (*write)(struct exfat_dev* dev);
 };
 
-extern const struct fs_object* objects[];
+extern const struct fs_object* const objects[];
 
 int get_sector_bits(void);
 int get_spc_bits(void);
-off_t get_volume_size(void);
+exfat_off_t get_volume_size(void);
 const le16_t* get_volume_label(void);
 uint32_t get_volume_serial(void);
 uint64_t get_first_sector(void);
 int get_sector_size(void);
 int get_cluster_size(void);
 
-int mkfs(struct exfat_dev* dev, off_t volume_size);
-off_t get_position(const struct fs_object* object);
+int mkfs(struct exfat_dev* dev, exfat_off_t volume_size);
+exfat_off_t get_position(const struct fs_object* object);
 
 #endif /* ifndef MKFS_MKEXFAT_H_INCLUDED */

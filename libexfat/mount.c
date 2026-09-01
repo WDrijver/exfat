@@ -87,8 +87,15 @@ static void parse_options(struct exfat* ef, const char* options)
 	ef->dmask = get_int_option(options, "dmask", 8, opt_umask);
 	ef->fmask = get_int_option(options, "fmask", 8, opt_umask);
 
+#if defined(__amigaos__) || defined(AMIGA)
+	/* AmigaOS has no user or group IDs; ACTION_EXAMINE_* reports 0 for both
+	   (section 13.3.1 of the AmigaDOS RKM). */
+	ef->uid = get_int_option(options, "uid", 10, 0);
+	ef->gid = get_int_option(options, "gid", 10, 0);
+#else
 	ef->uid = get_int_option(options, "uid", 10, geteuid());
 	ef->gid = get_int_option(options, "gid", 10, getegid());
+#endif
 
 	ef->noatime = exfat_match_option(options, "noatime");
 
@@ -108,7 +115,7 @@ static void parse_options(struct exfat* ef, const char* options)
 
 static bool verify_vbr_checksum(const struct exfat* ef, void* sector)
 {
-	off_t sector_size = SECTOR_SIZE(*ef->sb);
+	exfat_off_t sector_size = SECTOR_SIZE(*ef->sb);
 	uint32_t vbr_checksum;
 	size_t i;
 
@@ -280,7 +287,7 @@ int exfat_mount(struct exfat* ef, const char* spec, const char* options)
 				le64_to_cpu(ef->sb->sector_count), SECTOR_SIZE(*ef->sb),
 				exfat_get_size(ef->dev));
 	}
-	if ((off_t) le32_to_cpu(ef->sb->cluster_count) * CLUSTER_SIZE(*ef->sb) >
+	if ((exfat_off_t) le32_to_cpu(ef->sb->cluster_count) * CLUSTER_SIZE(*ef->sb) >
 			exfat_get_size(ef->dev))
 	{
 		exfat_error("file system in clusters is larger than device: "

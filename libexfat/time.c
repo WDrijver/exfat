@@ -24,7 +24,14 @@
 
 /* timezone offset from UTC in seconds; positive for western timezones,
    negative for eastern ones */
+#if defined(__amigaos__) || defined(AMIGA)
+/* Fixed at zero for this port - exfat_tzset() in amiga/amigaos.c is a no-op
+   because DateStamp is local time already - so make it read-only and keep it
+   out of BSS, which a ROM-resident handler may not have. */
+static const long exfat_timezone = 0;
+#else
 static long exfat_timezone;
+#endif
 
 #define SEC_IN_MIN 60ll
 #define SEC_IN_HOUR (60 * SEC_IN_MIN)
@@ -157,6 +164,14 @@ void exfat_unix2exfat(time_t unix_time, le16_t* date, le16_t* time,
 	*tzoffset = (uint8_t)(-exfat_timezone / 60 / 15) | 0x80;
 }
 
+#if defined(__amigaos__) || defined(AMIGA)
+
+/* AmigaOS: exfat_tzset() lives in amiga/amigaos.c.  There is no C run-time
+   in a file system process to call tzset()/gmtime()/mktime() through, and
+   exfat_timezone stays 0 so the library keeps the volume's local time. */
+
+#else
+
 void exfat_tzset(void)
 {
 	time_t now;
@@ -171,3 +186,5 @@ void exfat_tzset(void)
 	utc->tm_isdst = -1;
 	exfat_timezone = mktime(utc) - now;
 }
+
+#endif /* !AmigaOS */

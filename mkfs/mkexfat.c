@@ -27,10 +27,10 @@
 #include <stdio.h>
 #include <string.h>
 
-static int check_size(off_t volume_size)
+static int check_size(exfat_off_t volume_size)
 {
-	const struct fs_object** pp;
-	off_t position = 0;
+	const struct fs_object* const* pp;
+	exfat_off_t position = 0;
 
 	for (pp = objects; *pp; pp++)
 	{
@@ -52,12 +52,12 @@ static int check_size(off_t volume_size)
 }
 
 static int erase_object(struct exfat_dev* dev, const void* block,
-		off_t block_size, off_t start, off_t size)
+		exfat_off_t block_size, exfat_off_t start, exfat_off_t size)
 {
-	const off_t block_count = DIV_ROUND_UP(size, block_size);
-	off_t i;
+	const exfat_off_t block_count = DIV_ROUND_UP(size, block_size);
+	exfat_off_t i;
 
-	if (exfat_seek(dev, start, SEEK_SET) == (off_t) -1)
+	if (exfat_seek(dev, start, SEEK_SET) == (exfat_off_t) -1)
 	{
 		exfat_error("seek to 0x%"PRIx64" failed", start);
 		return 1;
@@ -76,9 +76,9 @@ static int erase_object(struct exfat_dev* dev, const void* block,
 
 static int erase(struct exfat_dev* dev)
 {
-	const struct fs_object** pp;
-	off_t position = 0;
-	const off_t block_size = 1024 * 1024;
+	const struct fs_object* const* pp;
+	exfat_off_t position = 0;
+	const exfat_off_t block_size = 1024 * 1024;
 	void* block = malloc(block_size);
 
 	if (block == NULL)
@@ -106,13 +106,13 @@ static int erase(struct exfat_dev* dev)
 
 static int create(struct exfat_dev* dev)
 {
-	const struct fs_object** pp;
-	off_t position = 0;
+	const struct fs_object* const* pp;
+	exfat_off_t position = 0;
 
 	for (pp = objects; *pp; pp++)
 	{
 		position = ROUND_UP(position, (*pp)->get_alignment());
-		if (exfat_seek(dev, position, SEEK_SET) == (off_t) -1)
+		if (exfat_seek(dev, position, SEEK_SET) == (exfat_off_t) -1)
 		{
 			exfat_error("seek to 0x%"PRIx64" failed", position);
 			return 1;
@@ -124,11 +124,23 @@ static int create(struct exfat_dev* dev)
 	return 0;
 }
 
-int mkfs(struct exfat_dev* dev, off_t volume_size)
+int mkfs(struct exfat_dev* dev, exfat_off_t volume_size)
 {
 	if (check_size(volume_size) != 0)
 		return 1;
 
+#if defined(__amigaos__) || defined(AMIGA)
+	/* A file system process has no stdout; progress goes to the log. */
+	exfat_debug("creating file system structures");
+	if (erase(dev) != 0)
+		return 1;
+	if (create(dev) != 0)
+		return 1;
+	exfat_debug("flushing");
+	if (exfat_fsync(dev) != 0)
+		return 1;
+	exfat_debug("file system created");
+#else
 	fputs("Creating... ", stdout);
 	fflush(stdout);
 	if (erase(dev) != 0)
@@ -142,14 +154,15 @@ int mkfs(struct exfat_dev* dev, off_t volume_size)
 	if (exfat_fsync(dev) != 0)
 		return 1;
 	puts("done.");
+#endif
 
 	return 0;
 }
 
-off_t get_position(const struct fs_object* object)
+exfat_off_t get_position(const struct fs_object* object)
 {
-	const struct fs_object** pp;
-	off_t position = 0;
+	const struct fs_object* const* pp;
+	exfat_off_t position = 0;
 
 	for (pp = objects; *pp; pp++)
 	{

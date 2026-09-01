@@ -22,6 +22,16 @@
 
 #include "exfat.h"
 #include <inttypes.h>
+#include <string.h>
+
+/* On AmigaOS the device layer (exfat_open/close/fsync/seek/read/write/
+   pread/pwrite and struct exfat_dev) lives in amiga/dev_io.c, driving an
+   Exec block device instead of a POSIX file descriptor.  Everything below
+   this guard is the POSIX implementation; exfat_generic_pread() and
+   exfat_generic_pwrite() at the end of this file are format logic and are
+   shared by every platform. */
+#if !defined(__amigaos__) && !defined(AMIGA)
+
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -49,9 +59,9 @@ struct exfat_dev
 {
 	int fd;
 	enum exfat_mode mode;
-	off_t size; /* in bytes */
+	exfat_off_t size; /* in bytes */
 #ifdef USE_UBLIO
-	off_t pos;
+	exfat_off_t pos;
 	ublio_filehandle_t ufh;
 #endif
 };
@@ -231,7 +241,7 @@ struct exfat_dev* exfat_open(const char* spec, enum exfat_mode mode)
 #elif defined(__NetBSD__)
 	if (!S_ISREG(stbuf.st_mode))
 	{
-		off_t size;
+		exfat_off_t size;
 
 		if (ioctl(dev->fd, DIOCGMEDIASIZE, &size) == -1)
 		{
@@ -328,12 +338,12 @@ enum exfat_mode exfat_get_mode(const struct exfat_dev* dev)
 	return dev->mode;
 }
 
-off_t exfat_get_size(const struct exfat_dev* dev)
+exfat_off_t exfat_get_size(const struct exfat_dev* dev)
 {
 	return dev->size;
 }
 
-off_t exfat_seek(struct exfat_dev* dev, off_t offset, int whence)
+exfat_off_t exfat_seek(struct exfat_dev* dev, exfat_off_t offset, int whence)
 {
 #ifdef USE_UBLIO
 	/* XXX SEEK_CUR will be handled incorrectly */
@@ -368,7 +378,7 @@ ssize_t exfat_write(struct exfat_dev* dev, const void* buffer, size_t size)
 }
 
 ssize_t exfat_pread(struct exfat_dev* dev, void* buffer, size_t size,
-		off_t offset)
+		exfat_off_t offset)
 {
 #ifdef USE_UBLIO
 	return ublio_pread(dev->ufh, buffer, size, offset);
@@ -378,7 +388,7 @@ ssize_t exfat_pread(struct exfat_dev* dev, void* buffer, size_t size,
 }
 
 ssize_t exfat_pwrite(struct exfat_dev* dev, const void* buffer, size_t size,
-		off_t offset)
+		exfat_off_t offset)
 {
 #ifdef USE_UBLIO
 	return ublio_pwrite(dev->ufh, (void*) buffer, size, offset);
@@ -387,13 +397,15 @@ ssize_t exfat_pwrite(struct exfat_dev* dev, const void* buffer, size_t size,
 #endif
 }
 
+#endif /* POSIX device layer */
+
 ssize_t exfat_generic_pread(const struct exfat* ef, struct exfat_node* node,
-		void* buffer, size_t size, off_t offset)
+		void* buffer, size_t size, exfat_off_t offset)
 {
 	uint64_t uoffset = offset;
 	cluster_t cluster;
 	char* bufp = buffer;
-	off_t lsize, loffset, remainder;
+	exfat_off_t lsize, loffset, remainder;
 
 	if (offset < 0)
 		return -EINVAL;
@@ -452,13 +464,13 @@ ssize_t exfat_generic_pread(const struct exfat* ef, struct exfat_node* node,
 }
 
 ssize_t exfat_generic_pwrite(struct exfat* ef, struct exfat_node* node,
-		const void* buffer, size_t size, off_t offset)
+		const void* buffer, size_t size, exfat_off_t offset)
 {
 	uint64_t uoffset = offset;
 	int rc;
 	cluster_t cluster;
 	const char* bufp = buffer;
-	off_t lsize, loffset, remainder;
+	exfat_off_t lsize, loffset, remainder;
 
 	if (offset < 0)
 		return -EINVAL;
