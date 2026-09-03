@@ -67,7 +67,7 @@ static UWORD opcode_at(const UBYTE* p)
 	return (UWORD)(((UWORD)p[0] << 8) | p[1]);
 }
 
-static ULONG operand_at(const UBYTE* p)
+static UNUSED ULONG operand_at(const UBYTE* p)
 {
 	return ((ULONG)p[0] << 24) | ((ULONG)p[1] << 16) |
 			((ULONG)p[2] << 8) | (ULONG)p[3];

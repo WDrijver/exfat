@@ -1837,7 +1837,7 @@ static BOOL resolve_extent(struct ExfatHandler* h)
    starting block.  A named semaphore needs no DosList lock, so unlike
    walking the device list this is safe during startup, when GetDeviceProc()
    holds that lock (section 12.1.2). */
-static BOOL claim_partition(struct ExfatHandler* h)
+static UNUSED BOOL claim_partition(struct ExfatHandler* h)
 {
 	EXFAT_BASES(h);
 	char name[80];
@@ -1964,9 +1964,18 @@ static BOOL startup(struct ExfatHandler* h, struct DosPacket* pkt)
 		return FALSE;
 	}
 
-	/* Refuse to be the second handler on this partition. */
-	if (!claim_partition(h))
-		return FALSE;
+	/* The partition claim is deliberately NOT taken here.
+
+	   claim_partition() refuses to be the second handler on a partition,
+	   which was the backstop against a card being mounted twice - once from
+	   a DOSDrivers mountlist and once by sagasd.device's auto-mount - with
+	   two handlers each keeping their own node cache, allocation bitmap and
+	   dirty flag.  The mountlist route has since been removed, so
+	   sagasd.device is the only mounter and there is nothing to race.
+
+	   claim_partition() and release_partition() are kept compiled and
+	   type-checked so the guard can be put back by restoring this call;
+	   release_partition() is a no-op while h->claim is NULL. */
 
 	/* Route every subsequent packet for this device to us (12.1.2). */
 	h->devlist->dol_Task = h->port;

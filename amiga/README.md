@@ -68,12 +68,14 @@ twice".
 The same binary goes into a Kickstart ROM image (built with Remus) — it
 carries a `Resident` tag, which is what the ROM tool scans for.
 
-**Current state:** the default build is ROM-safe and proven on hardware, but
-its tag **registers nothing**, so `L:exfat-handler` is still required and the
-ROM copy is never actually used. `make ROMREG=1` makes the tag register
-`FATX` in `FileSystem.resource`, which is the point of the exercise — that
-path does not work yet. See `../CLAUDE.md`, "ROM residency: where this
-actually stands", for exactly what was ruled out and where to pick it up.
+**ROM residency is no longer a goal** — see `../CLAUDE.md`, "ROM residency —
+DISMISSED". The handler ships in `L:` and is mounted by `sagasd.device`'s
+auto-mount. The `Resident` tag stays in the binary but registers nothing
+(`ROMREG` defaults to 0) and costs nothing at run time, since `rt_Init` is
+only ever called by a ROM boot scan.
+
+`entry.S` still matters and must stay first in the link order — that is a
+GCC 6.5.0 code-layout issue, not a ROM one.
 
 Check it before handing the file to the ROM tool:
 

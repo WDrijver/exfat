@@ -62,7 +62,24 @@ partition" path.
 
 Partition type bytes are not trusted on their own - `0x07` covers exFAT and
 NTFS alike - so a candidate only counts if an exFAT boot sector is actually
-present at its first sector.
+present at its first sector.  The same applies to a GPT type GUID.
+
+Three table shapes are walked, all in `amiga/parttable.c`:
+
+- **MBR primaries** - the four entries at offset 446.
+- **GPT** - behind a protective `0xEE` entry; header at LBA 1, entry array
+  wherever the header says.
+- **Extended / logical partitions** - types `0x05`, `0x0F`, `0x85`.  An
+  extended partition has no boot sector of its own, only a chain of EBRs.
+  **Each EBR uses two different bases**: its first slot describes a logical
+  partition, start relative to *that EBR*; its second slot links to the next
+  EBR, start relative to the *extended partition as a whole*.  Mixing those
+  up walks off into nothing.  The chain is bounded at 16 links because a
+  corrupt table can link to itself.
+
+Each of those uses `buf` as its probe buffer, so the MBR is re-read before
+the next entry is taken from it.  That restore used to be skipped on the GPT
+path - harmless only because a protective MBR carries a single entry.
 
 Published nodes use a synthetic geometry of `Surfaces = BlocksPerTrack = 1`,
 so one cylinder is one block and `LowCyl`/`HighCyl` are plain LBAs.  That is
@@ -218,6 +235,17 @@ A three-partition card mounts all three volumes from one generic mount file
 (`LowCyl = 0`): `EXF0:` serves the first, `EXF1:`/`EXF2:` are published and
 activated, each with the correct geometry for its own extent.
 
+**GPT verified too:** a card partitioned GPT with an EFI System Partition
+plus two exFAT volumes mounts both, via `sagasd.device`'s auto-mount.  That
+took a matching fix on the driver side - a GPT card normally carries an ESP
+as entry 0, formatted FAT32, so a content probe finds FAT there first and
+hands the whole card to fat95.  See the sagasd changelog.
+
+**Extended / logical partitions verified** as well, so all three table
+shapes - MBR primaries, GPT, and the EBR chain - are confirmed on hardware
+on both the driver and handler sides.  Partition discovery has no untested
+branch left.
+
 Three traps found getting there, all worth remembering:
 
 - **The handler must stay reentrant.**  A seglist is one loaded image, so
@@ -284,11 +312,19 @@ the partition.
 
 A card mounted both from a DOSDrivers file and by `sagasd.device`'s
 auto-mount gets two handler processes per partition, each with its own node
-cache, allocation bitmap and dirty flag - which corrupts the volume.  The
-handler claims each partition with a public semaphore named
-`exfat/<device>/<unit>/<firstbyte>` and refuses a second claim.  A named
-semaphore needs no DosList lock, so it works during startup where walking the
-device list would deadlock.
+cache, allocation bitmap and dirty flag - which corrupts the volume.
+
+`claim_partition()` guards against that: it claims each partition with a
+public semaphore named `exfat/<device>/<unit>/<firstbyte>` and refuses a
+second claim.  A named semaphore needs no DosList lock, so it works during
+startup where walking the device list would deadlock.
+
+**It is deliberately not called** (`handler.c`, in `startup()`).  The
+mountlist route has been removed, so `sagasd.device` is the only mounter and
+there is nothing to race.  Both functions stay compiled and type-checked so
+the guard can be restored by putting the call back;
+`release_partition()` is a no-op while `h->claim` is NULL, so the two are
+never mismatched.
 
 **The supported route is sagasd.device's auto-mount.**  It probes the boot
 sector when it finds no RDB and hands an exFAT card to this handler, the way
@@ -360,6 +396,32 @@ lives in libc, so the link line is `-lc $(LIBGCC) -lc`.
     nm obj/*.o | awk '$2=="D"||$2=="d"'            # writable data: review each
 
 Current sizes: **46,492** bytes read-only, **64,084** read-write.
+
+## ROM residency - DISMISSED, do not resume without a new reason
+
+**This is no longer a goal.**  The handler ships as `L:exfat-handler` and is
+mounted by `sagasd.device`'s auto-mount, which is proven and is the supported
+route.  Everything below is kept because it was expensive to learn and is
+correct as far as it goes - not because the work is meant to continue.
+
+Where it ended: a module matched to the handler on file size, CODE size,
+hunk layout, relocation count and relocation spread **boots and runs its
+`rt_Init`**, while the handler at that same weight does not.  Everything
+checkable about the handler's binary is correct.  The cause was never
+identified and would need Remus's own diagnostics, not more binaries.
+
+What still matters from it, regardless of ROM:
+
+- `amiga/entry.S` **must stay first in the link order**.  That is not a ROM
+  concern: GCC 6.5.0 places a string literal at the start of the code hunk,
+  so AmigaDOS would enter the handler on data and die with `80000004`.  The
+  creep-ltx/exfat-aos3 port hit the identical trap independently.
+- The no-writable-static-data work (no BSS, no DATA, `SysBase`/`DOSBase` as
+  locals, private allocator) is what makes the handler **reentrant**, which
+  is what lets several partitions share one seglist.  That is exercised in
+  normal use and must not be undone.
+- `ROMREG` defaults to 0, so the ROM tag registers nothing and costs nothing
+  at run time; `rt_Init` is only ever called by a ROM boot scan.
 
 ## ROM residency: the module must be a Resident
 

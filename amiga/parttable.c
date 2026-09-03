@@ -35,6 +35,12 @@
 
 #define MBR_TYPE_EXFAT	0x07	/* also NTFS; the VBR check disambiguates */
 #define MBR_TYPE_GPT	0xEE	/* protective MBR */
+#define MBR_TYPE_EXT_CHS	0x05	/* extended, CHS addressed */
+#define MBR_TYPE_EXT_LBA	0x0F	/* extended, LBA addressed */
+#define MBR_TYPE_EXT_LINUX	0x85	/* Linux extended */
+
+/* Bound the EBR chain: a corrupt table can link to itself. */
+#define EBR_MAX_LINKS	16
 
 /* Offsets into a GPT header (LBA 1). */
 #define GPT_SIG		0
@@ -80,6 +86,63 @@ static void add(struct ExfatPartition* out, int max, int* n,
 	(*n)++;
 	Debug_Info("  exFAT partition %ld: %s, LBA %lu, %lu sectors\n",
 			(LONG)(*n - 1), how, (ULONG)first, (ULONG)count);
+}
+
+static BOOL is_extended_type(UBYTE type)
+{
+	return (type == MBR_TYPE_EXT_CHS || type == MBR_TYPE_EXT_LBA ||
+			type == MBR_TYPE_EXT_LINUX) ? TRUE : FALSE;
+}
+
+/* Walk the extended-partition chain and collect every exFAT volume in it.
+
+   An extended partition has no boot sector of its own; it holds a chain of
+   EBRs, one per logical partition.  Each EBR's first slot describes that
+   logical partition, its start relative to that EBR; the second slot links
+   to the next EBR, its start relative to the extended partition as a whole.
+   Those two bases are different, and mixing them up is the classic way to
+   walk off into nothing. */
+static int scan_extended(struct exfat_dev* dev, ULONG blocksize,
+		uint64_t ext_start, UBYTE* buf, struct ExfatPartition* out, int max)
+{
+	EXFAT_SYSBASE;
+	UBYTE* ebr = AllocVec(blocksize, MEMF_PUBLIC | MEMF_CLEAR);
+	uint64_t here = ext_start;
+	int n = 0;
+	int link;
+
+	if (ebr == NULL)
+		return 0;
+
+	for (link = 0; link < EBR_MAX_LINKS && n < max; link++)
+	{
+		const UBYTE* logical;
+		const UBYTE* next;
+		uint64_t first, count, nextrel;
+
+		if (exfat_pread(dev, ebr, blocksize,
+				(exfat_off_t)(here * blocksize)) < 0)
+			break;
+		if (le16at(ebr + MBR_SIG) != 0xAA55)
+			break;
+
+		logical = ebr + MBR_TABLE;
+		next    = ebr + MBR_TABLE + MBR_ENTRY_SIZE;
+
+		first = here + (uint64_t)le32at(logical + 8);
+		count = le32at(logical + 12);
+		if (logical[4] != 0 && count != 0 &&
+				is_exfat_at(dev, first, blocksize, buf))
+			add(out, max, &n, first, count, "logical partition");
+
+		nextrel = le32at(next + 8);
+		if (next[4] == 0 || nextrel == 0)
+			break;			/* end of the chain */
+		here = ext_start + nextrel;
+	}
+
+	FreeVec(ebr);
+	return n;
 }
 
 static int scan_gpt(struct exfat_dev* dev, ULONG blocksize, UBYTE* buf,
@@ -183,16 +246,20 @@ int exfat_amiga_scan_partitions(struct exfat_dev* dev, ULONG blocksize,
 
 		if (type == 0 || count == 0)
 			continue;
+
 		if (type == MBR_TYPE_GPT)
-		{
 			n += scan_gpt(dev, blocksize, buf, out + n, max - n);
-			continue;
-		}
+		else if (is_extended_type(type))
+			n += scan_extended(dev, blocksize, first, buf, out + n, max - n);
 		/* Trust the boot sector rather than the type byte: 0x07 covers both
 		   exFAT and NTFS, and some formatters use other values. */
-		if (is_exfat_at(dev, first, blocksize, buf))
+		else if (is_exfat_at(dev, first, blocksize, buf))
 			add(out, max, &n, first, count, "MBR entry");
-		/* is_exfat_at() reused buf, so restore the MBR for the next entry */
+
+		/* Every branch above uses buf as its probe buffer, so the MBR has
+		   to be read back before the next entry is taken from it.  This
+		   used to be skipped on the GPT path, which only went unnoticed
+		   because a protective MBR has just the one entry. */
 		if (i + 1 < MBR_ENTRIES && exfat_pread(dev, buf, blocksize, 0) < 0)
 			break;
 	}
