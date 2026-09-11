@@ -3,6 +3,20 @@
 Layers on top of the workspace `CLAUDE.md` at the repository root. Where this
 file and the root file disagree about this project, this file wins.
 
+
+## Versioning
+
+`VERSION` in `amiga/Makefile` is the single source: it becomes the
+`$VER:` string, the tag's `rt_Version` byte and the `fse_Version` longword
+in `FileSystem.resource`. **Bump it on every commit that changes the
+handler.** The serial log's `$VER` line is then the only thing needed to
+know which ROM is running, and sagasd's mounter prefers the higher of a
+ROM entry and a disk copy - at a stale version, a copy left on a card
+quietly wins.
+
+It sat at 0.1 from the start of the project through all of the ROM work.
+1.0 is the first build in which ROM registration is expected to work.
+
 ## Goal
 
 An exFAT file system handler for AmigaOS 3.2 that mounts through the standard

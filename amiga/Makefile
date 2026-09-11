@@ -20,7 +20,11 @@ OBJDIR   = obj
 
 export LC_ALL := C
 
-VERSION ?= 0.1
+# Bumped on EVERY commit that changes the handler, so the $VER line in
+# the serial log and the rt_Version byte in the ROM say which build is
+# actually running.  1.0 is the first build in which ROM registration is
+# expected to work (coldstart priority above sagasd.device).
+VERSION ?= 1.0
 
 BUILD_DATE := $(shell date +"%d.%m.%Y-%H.%M.%S")
 
