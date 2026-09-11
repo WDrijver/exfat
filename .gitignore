@@ -13,6 +13,10 @@ Makefile.in
 # ./configure
 .deps/
 Makefile
+# ...but amiga/Makefile is hand-written, not generated, and it is the
+# whole Amiga build: every ROM switch and its reasoning lives there.
+# It sat untracked for the life of this repo because of the rule above.
+!amiga/Makefile
 /config.log
 /config.status
 /libexfat/config.h
@@ -27,3 +31,8 @@ Makefile
 /label/exfatlabel
 /libexfat/libexfat.a
 /mkfs/mkexfatfs
+
+# Amiga build output and macOS litter
+amiga/build/
+amiga/obj/
+.DS_Store
