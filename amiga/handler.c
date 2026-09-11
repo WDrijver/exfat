@@ -267,25 +267,35 @@ static BOOL resolve_path(struct ExfatHandler* h, struct ExfatLock* base,
 
 	exfat_amiga_bstr_to_utf8(bpath, rel, sizeof(rel));
 
+	/* Anything before a colon has ALREADY been resolved by dos.library:
+	   for a volume name it passes no lock and means the root, and for an
+	   assign it passes the assign's own lock in dp_Arg1 - and, in both
+	   cases, the full string with the prefix still on it.  So the prefix is
+	   skipped and the rest is resolved relative to the lock, exactly as a
+	   name with no colon would be.  Only a NULL lock means the root.
+
+	   This used to treat every colon as "start from the root", which is
+	   right for EXF0:foo and wrong for C:foo: the lock on SYS:C arrived in
+	   dp_Arg1 and was thrown away, so C:ApolloMap was looked up as
+	   /ApolloMap and "CD C:" landed on the root.  The card booted and no
+	   command in the Startup-Sequence could be found. */
 	p = strchr(rel, ':');
-	if (p != NULL)
+	if (p == rel)
 	{
-		/* absolute: ignore the device/volume name in front of the colon */
+		/* A leading colon with nothing before it - ":foo" - means the root
+		   of the volume the lock is on, whatever the lock.  There is one
+		   volume behind this handler, so that is simply the root. */
+		base = NULL;
+	}
+	p = (p != NULL) ? p + 1 : rel;
+
+	if (base == NULL)
+	{
 		abs[0] = '/';
 		abs[1] = '\0';
-		p++;
 	}
-	else
-	{
-		if (base == NULL)
-		{
-			abs[0] = '/';
-			abs[1] = '\0';
-		}
-		else if (!node_abs_path(h, base->node, abs, sizeof(abs)))
-			return FALSE;
-		p = rel;
-	}
+	else if (!node_abs_path(h, base->node, abs, sizeof(abs)))
+		return FALSE;
 
 	pos = (int)strlen(abs);
 	/* strip the trailing slash of the root so appends are uniform */

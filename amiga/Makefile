@@ -24,7 +24,7 @@ export LC_ALL := C
 # the serial log and the rt_Version byte in the ROM say which build is
 # actually running.  1.0 is the first build in which ROM registration is
 # expected to work (coldstart priority above sagasd.device).
-VERSION ?= 1.2
+VERSION ?= 1.3
 
 BUILD_DATE := $(shell date +"%d.%m.%Y-%H.%M.%S")
 
