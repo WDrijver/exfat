@@ -186,6 +186,34 @@ write path is enabled.
 
 ## Write phase progress
 
+**ROM + WRITE=1, verified on hardware 2026-09-11.**  `exfat-handler 1.4`
+built `ROMREG=1 WRITE=1 DEBUG=12` (62,968 bytes, 60,544 CODE) runs from
+Kickstart, registers `FATX`, and `sagasd.device`'s auto-mount brings an
+exFAT card up **read-write** with no `L:exfat-handler` on any volume.
+
+The workload that proves it is a CD32 title, not a synthetic test: Brian
+the Lion, 551 MB of preload blob read in one sustained pass while the
+title also writes - CD audio correct throughout, and its save slots
+reading EMPTY rather than "RAM FULL", which is a write-path answer
+because `nonvolatile.library` only reports free space on a volume it can
+write.  That is the largest read and the first real write this handler
+has served from ROM.
+
+Two things worth carrying forward from getting here:
+
+- **An exFAT ROM does not need fat95.**  The card is exFAT, so fat95 has
+  nothing to mount, and dropping it frees 27,336 bytes - which is what
+  pays for write support (+16,564 over the read-only DEBUG=12 build,
+  +11,264 without debug) inside a 128 KB budget that was previously
+  5 KB short.  The read-only build was never the size ceiling it looked
+  like; fat95 was.
+- **`cdload.log` is a free verdict on the mount mode.**  cdload writes
+  it to `SYS:`, so it raised a write-protect requester on the read-only
+  exFAT card and simply appears on the read-write one.  A card tells you
+  which way it mounted before the title starts.
+
+The phases behind that, in the order they were brought up:
+
 - **Phase 0 (host harness): done.**  `hosttest/` runs 30 unit tests and 10
   filesystem scenarios, each validated with `exfatfsck`.  `make test`.
 - **Phase 1 (read-write mount): verified on hardware.**  Mounting read-write
