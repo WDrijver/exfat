@@ -46,7 +46,7 @@ extern void exfat_handler_entry(void);	/* entry.S, module offset 0 */
 
 /* A marker that goes to the UART directly, with no exec call in the way.
 
-   Debug_Warn() reaches the serial port through Forbid() and RawDoFmt(), and
+   Debug_Flag() reaches the serial port through Forbid() and RawDoFmt(), and
    RawDoFmt() takes a callback and walks a format string.  When rt_Init
    produces no output at all, that is two possibilities, not one: the routine
    never ran, or it ran and died inside that machinery.  ApolloDebugPutStr()
@@ -103,10 +103,14 @@ const char exfat_rom_id[] =
    so a failure here just means the ROM copy is not offered and a mounter
    falls back to loading L:exfat-handler.
 
-   The stage markers are Debug_Warn, not Debug_Info, on purpose: they must
-   show up in a default DEBUG=6 build, because when a ROM boot dies this is
-   the only narrative there is.  Two lines once per boot is a fair price.
-   Drop them to Debug_Info once ROM booting has been proven on hardware. */
+   The stage markers are Debug_Flag, on a channel of their own.  They used
+   to be Debug_Warn so they would survive a build that dropped INFO - but
+   WARN also carries libexfat's operational warnings, and those cost 3.5 KB
+   of ROM that the 128 KB budget no longer has.  DBG_FLAG had no users at
+   all, so it is free: build with DEBUG=12 (FLAG + ERROR) and you get every
+   line this routine can say, plus every error anywhere, and none of the
+   noise.  When a ROM boot dies this is the only narrative there is, and
+   it now costs a few hundred bytes rather than several thousand. */
 ULONG exfat_rom_init(void)
 {
 	EXFAT_SYSBASE;
@@ -120,7 +124,7 @@ ULONG exfat_rom_init(void)
 	/* Raw first, then the normal path: if only the raw one appears, the
 	   fault is in Forbid()/RawDoFmt() at coldstart, not in rt_Init. */
 	rom_mark("rt_Init reached");
-	Debug_Warn("exfat romtag: init entered\n");
+	Debug_Flag("exfat romtag: init entered\n");
 	rom_mark("Debug_Warn survived");
 
 	/* Relocation self-check.  Offset 0 of this module is "jmp
@@ -137,7 +141,7 @@ ULONG exfat_rom_init(void)
 				(ULONG)opcode_at((const UBYTE*)exfat_handler_entry));
 		return 0;
 	}
-	Debug_Warn("exfat romtag: entry %08lx verified\n",
+	Debug_Flag("exfat romtag: entry %08lx verified\n",
 			(ULONG)exfat_handler_entry);
 
 #ifndef EXFAT_ROMTAG_REGISTER
@@ -147,7 +151,7 @@ ULONG exfat_rom_init(void)
 
 	   Registering (make ROMREG=1) is what is still being brought up; see
 	   ../CLAUDE.md, "ROM residency", for where that stands. */
-	Debug_Warn("exfat romtag: present, not registering "
+	Debug_Flag("exfat romtag: present, not registering "
 			"(build with ROMREG=1 to register)\n");
 	return 0;
 #else
@@ -160,7 +164,7 @@ ULONG exfat_rom_init(void)
 		return 0;
 	}
 
-	Debug_Warn("exfat romtag: FileSystem.resource at %08lx\n", (ULONG)fsr);
+	Debug_Flag("exfat romtag: FileSystem.resource at %08lx\n", (ULONG)fsr);
 
 	/* This runs at coldstart, before anything has validated the resource.
 	   An empty exec List has lh_Head pointing at lh_Tail, never NULL, so a
@@ -182,12 +186,12 @@ ULONG exfat_rom_init(void)
 		if (e->fse_DosType == EXFAT_DOSTYPE)
 		{
 			Permit();
-			Debug_Warn("exfat romtag: 'FATX' is already registered\n");
+			Debug_Flag("exfat romtag: 'FATX' is already registered\n");
 			return 0;
 		}
 	Permit();
 
-	Debug_Warn("exfat romtag: no 'FATX' entry yet, adding one\n");
+	Debug_Flag("exfat romtag: no 'FATX' entry yet, adding one\n");
 
 	rom_mark("allocating FileSysEntry");
 	fse = AllocMem(sizeof(*fse), MEMF_PUBLIC | MEMF_CLEAR);
@@ -281,7 +285,7 @@ registered:				/* only the fat95 path jumps here */
 #endif
 	Permit();
 
-	Debug_Warn("exfat romtag: registered 'FATX' %ld.%ld, seglist %08lx -> "
+	Debug_Flag("exfat romtag: registered 'FATX' %ld.%ld, seglist %08lx -> "
 			"code %08lx, ROM entry %08lx\n",
 			(LONG)EXFAT_VER, (LONG)EXFAT_REV, (ULONG)fse->fse_SegList,
 			(ULONG)BADDR(fse->fse_SegList) + 4,

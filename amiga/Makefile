@@ -24,7 +24,7 @@ export LC_ALL := C
 # the serial log and the rt_Version byte in the ROM say which build is
 # actually running.  1.0 is the first build in which ROM registration is
 # expected to work (coldstart priority above sagasd.device).
-VERSION ?= 1.0
+VERSION ?= 1.1
 
 BUILD_DATE := $(shell date +"%d.%m.%Y-%H.%M.%S")
 
@@ -69,8 +69,18 @@ VER_MINOR = $(word 2,$(subst ., ,$(VERSION)))
 CFLAGS += -DEXFAT_VER=$(VER_MAJOR) -DEXFAT_REV=$(if $(VER_MINOR),$(VER_MINOR),0)
 
 # Debug level for the ApolloCrossDev debug macros:
-#   1 INFO, 2 WARN, 4 ERROR, 8 FLAG, 16 TRACE.  Errors and warnings only by
-#   default; add INFO with  make DEBUG=7
+#   1 INFO, 2 WARN, 4 ERROR, 8 FLAG, 16 TRACE.
+#
+# What each costs in ROM (ROMREG=1, measured 2026-09-11):
+#   none      42244     DEBUG=8  FLAG          42252
+#   DEBUG=4   errors    45528    DEBUG=12 FLAG+ERROR  ~46000
+#   DEBUG=6   +warn     49028    DEBUG=7  everything   51616
+#
+# FLAG is the ROM tag's own channel: exfat_rom_init's stage markers and
+# nothing else, so it is nearly free.  For diagnosing ROM registration use
+#   make clean && make ROMREG=1 DEBUG=12
+# which reports every step of the tag and every error anywhere, and fits
+# where DEBUG=7 does not.
 ifdef DEBUG
 CFLAGS  += -DDEBUG=$(DEBUG)
 endif
