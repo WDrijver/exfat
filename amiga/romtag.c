@@ -211,6 +211,15 @@ ULONG exfat_rom_init(void)
 	   10 is already what we want. */
 	fse->fse_PatchFlags   = FSEF_STACKSIZE | FSEF_SEGLIST | FSEF_GLOBALVEC;
 	fse->fse_StackSize    = EXFAT_STACKSIZE;
+	/* Set HERE, with the other fields, and not further down.  It used to
+	   sit after the RAM-segment fallback, and the fat95-style path above
+	   it ends in `goto registered` - so on every boot where the module was
+	   longword aligned, which is every boot on this ROM, it was skipped.
+	   The entry then carried a GlobalVec of 0 with FSEF_GLOBALVEC set, the
+	   mounter copied that 0 into the node exactly as told, and AmigaDOS
+	   started a C handler as if it were BCPL.  The symptom was Lock()
+	   failing with IoErr 103 on a volume that had mounted perfectly. */
+	fse->fse_GlobalVec    = (BPTR)-1;	/* C handler, not BCPL */
 	/* Prefer fat95's segment list: the module itself, with BADDR four bytes
 	   before its first instruction.  That needs the module to be longword
 	   aligned in the ROM - MKBADDR is a plain >> 2 - which was unknowable
@@ -267,8 +276,6 @@ ULONG exfat_rom_init(void)
 			return 0;
 		}
 	}
-	fse->fse_GlobalVec    = (BPTR)-1;	/* C handler, not BCPL */
-
 	/* AddHead, which is what fat95 uses.  Enqueue() would sort by ln_Pri,
 	   which means walking every existing node at coldstart for no gain -
 	   mounters take the first DOSType match, so a copy added later from
