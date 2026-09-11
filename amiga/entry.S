@@ -66,7 +66,17 @@ _exfat_romtag:
 	.byte	EXFAT_VER		| rt_Version
 	.byte	0			| rt_Type = NT_UNKNOWN: not a
 					|   library, device or resource
-	.byte	0			| rt_Pri
+	.byte	EXFAT_ROM_PRI		| rt_Pri - MUST exceed sagasd.device's.
+					|   Coldstart tags run in descending
+					|   priority, and sagasd (pri 5) calls
+					|   CheckUnit() straight from its init:
+					|   ScanMBR() looks for FATX in
+					|   FileSystem.resource right then, not
+					|   five seconds later.  At priority 0
+					|   this module registered *after* that
+					|   look, and the serial log read
+					|   "exfat dostype not found" on every
+					|   boot.  fat95 hit the same thing.
 #endif
 	.long	_exfat_rom_name		| rt_Name
 	.long	_exfat_rom_id		| rt_IdString

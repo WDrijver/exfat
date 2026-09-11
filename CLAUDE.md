@@ -452,10 +452,20 @@ it again needs a reason and a hardware test.
   instruction and the tag right behind it.  C gives no way to order a
   function and a data object inside one object file, which is why this is
   not C.
-- **`RTF_COLDSTART`, priority 0.**  fat95 registers from ROM at coldstart,
-  which is proof that `FileSystem.resource` already exists then.  It also
-  removes any ordering doubt against `sagasd.device` (`RTF_COLDSTART`,
-  priority 5), whose own mounting is deferred by five seconds anyway.
+- **`RTF_COLDSTART`, priority 10 (`PRI=` in the Makefile).**  fat95
+  registers from ROM at coldstart, which is proof that
+  `FileSystem.resource` already exists then.
+
+  The priority has to be **above sagasd.device's 5**, and this note used
+  to say 0 was fine because sagasd's mounting "is deferred by five
+  seconds anyway".  That was wrong: the five-second delay is the
+  DiskChangeDaemon's, and sagasd calls `CheckUnit()` **directly from its
+  `init()`** as well - `ScanMBR()` looks for `FATX` in
+  `FileSystem.resource` at coldstart, at priority 5.  Coldstart tags run
+  in descending priority, so at 0 this module registered after that
+  look, and the serial log said "exfat dostype not found" on every boot
+  with nothing else wrong.  fat95 needed the same raise for the same
+  reason.
 - **`rt_EndSkip` is the end of the whole module**, not just past the tag.
   The linker defines `__etext` at the end of `.text`, which is the module's
   end **only because there is a single hunk** - see below.
@@ -596,7 +606,8 @@ tag bytes are the only difference.  The likely explanation is that Remus does
 not handle a negative-priority AFTERDOS module in the ROM's module table.
 This also retro-explains the very first ROM attempt, which was AFTERDOS and
 was written off at the time as having other defects.  Stay on
-`RTF_COLDSTART` priority 0, which is what fat95 uses.
+`RTF_COLDSTART` - at priority 10, not 0; see the tag notes above for why
+0 lost the race against sagasd.device.
 
 13. `NOADD=1` - the same read-only registering build with **24 bytes**
     changed, one `#ifdef` swapping `AddHead` for a log call - prints

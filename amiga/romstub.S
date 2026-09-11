@@ -63,7 +63,7 @@ romtag:
 	.byte	1			| rt_Flags = RTF_COLDSTART
 	.byte	0			| rt_Version
 	.byte	0			| rt_Type = NT_UNKNOWN
-	.byte	0			| rt_Pri - same as exfat-handler's
+	.byte	EXFAT_ROM_PRI		| rt_Pri - same as exfat-handler's
 	.long	name			| rt_Name
 	.long	idstring		| rt_IdString
 	.long	init			| rt_Init
