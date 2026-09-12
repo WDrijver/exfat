@@ -212,6 +212,26 @@ Two things worth carrying forward from getting here:
   exFAT card and simply appears on the read-write one.  A card tells you
   which way it mounted before the title starts.
 
+### Building the module to flash
+
+    cd amiga
+    make clean
+    make ROMREG=1 DEBUG=12 WRITE=1        # 62,968 bytes - what is flashed
+    make clean && make ROMREG=1 WRITE=1   # 57,668, no serial trace
+
+`build/exfat-handler` is the file Remus ingests.  `make clean` between
+switch combinations is not optional: the switches change what is
+compiled in, and the object rule does not know that.
+
+The build is **reproducible from the tag**: rebuilding 1.4 from the
+committed source gives a binary differing from the flashed one in
+exactly six bytes, the build timestamp inside the `$VER` string.  So
+there is no reason to keep a copy of a flashed module anywhere - the
+version in `$VER` plus this recipe reproduces it, and a kept copy is one
+more thing that can go stale while looking authoritative.  A
+`CD32_ROMMODULES` folder on the CD32 volume did exactly that and has
+been removed.
+
 The phases behind that, in the order they were brought up:
 
 - **Phase 0 (host harness): done.**  `hosttest/` runs 30 unit tests and 10
