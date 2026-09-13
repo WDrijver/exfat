@@ -157,15 +157,26 @@ $(BUILDDIR)/$(TARGET): $(OBJ)
 
 # Whether the ROM tag registers the handler in FileSystem.resource.
 #
-# Default 0, which is the configuration proven on hardware: the module sits
-# in the ROM as a well-formed member and registers nothing, so mounting goes
-# through L:exfat-handler.  ROMREG=1 registers 'FATX' - that path still
-# freezes or fails to mount on the V4, see ../CLAUDE.md.
+# ROMREG=1 registers 'FATX' and is what you want for a ROM build: verified
+# on hardware 2026-09-11, mounting an exFAT card read-write from Kickstart
+# with no L:exfat-handler on any volume.  The default is still 0 because
+# that is the safe build - the module sits in the ROM registering nothing
+# and mounting goes through L:exfat-handler.
+#
+# If sagasd's log says "no FileSystem.resource entry for exFAT", this
+# switch was off.
 # NOTE: changing this (or WRITE, or DEBUG) only alters CFLAGS - make has no
 # way to know the objects are stale, so it will relink without recompiling
 # and hand you a binary built with the PREVIOUS setting.  Always "make clean"
 # when changing a switch.  This has already produced one binary that was
 # labelled ROMREG=1 and was not.
+ifdef ROMTAG
+$(error The switch is ROMREG, not ROMTAG.  `make ROMTAG=1` sets a variable \
+nothing reads, so the build silently comes out with ROMREG=0 and registers \
+nothing - which shows up as "no FileSystem.resource entry for exFAT" in \
+sagasd's log.  Use: make clean && make ROMREG=1 DEBUG=12 WRITE=1)
+endif
+
 ROMREG ?= 0
 ifneq ($(ROMREG),0)
 CFLAGS += -DEXFAT_ROMTAG_REGISTER

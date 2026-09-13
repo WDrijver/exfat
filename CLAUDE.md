@@ -219,6 +219,15 @@ Two things worth carrying forward from getting here:
     make ROMREG=1 DEBUG=12 WRITE=1        # 62,968 bytes - what is flashed
     make clean && make ROMREG=1 WRITE=1   # 57,668, no serial trace
 
+**The switch is `ROMREG`.** `make ROMTAG=1` sets a variable nothing
+reads: the build comes out `ROMREG=0`, registers nothing, and sagasd
+says *"no FileSystem.resource entry for exFAT, loading L:exfat-handler
+instead"*. That is now a hard error in the Makefile rather than a quiet
+49,608-byte binary that looks like a build.
+
+**Check the size.** The flashable build is **62,968 bytes**. Anything
+else is a different configuration, whatever was typed.
+
 `build/exfat-handler` is the file Remus ingests.  `make clean` between
 switch combinations is not optional: the switches change what is
 compiled in, and the object rule does not know that.
@@ -567,12 +576,20 @@ boots, the ROM tag runs, and the machine is stable with an exFAT card
 inserted at boot or later.  That is the **default build** (`ROMREG=0`), in
 which `rt_Init` logs one line and registers nothing.
 
-**Not working:** `ROMREG=1`, where `rt_Init` registers `FATX` in
-`FileSystem.resource` so that mounting uses the ROM copy.  Until that works,
-**the ROM copy is inert and `L:exfat-handler` is still required** - so ROM
-residency is not yet achieved, it merely does no harm.
+**Also proven, and this section is older than that:** `ROMREG=1` works.
+`exfat-handler 1.4` built `ROMREG=1 WRITE=1 DEBUG=12` registers `FATX`,
+mounts an exFAT card **read-write from Kickstart** with no
+`L:exfat-handler` on any volume, and served Brian the Lion's 551 MB
+preload under load - see *Write phase progress* above, 2026-09-11.
 
-What the bisect established, in order, each on hardware:
+**Everything below this line is the bisect from 2026-09-01**, ten days
+earlier, when registration did not work. It is kept because the method
+is worth having and several of its findings still stand - `AFTERDOS`
+really is unusable, the priority really does have to beat sagasd's - but
+**its conclusion is superseded**. Do not read "Not working" here as
+current.
+
+What that bisect established, in order, each on hardware:
 
 1. `romstub` (272 bytes, a Resident and nothing else) boots and logs.  Remus
    integration, the tag layout and `RTF_COLDSTART` at priority 0 are all
@@ -676,7 +693,14 @@ was written off at the time as having other defects.  Stay on
     **nothing at all**.  `rt_Init` is not called.  The 24-bytes-smaller
     build ran it to completion.
 
-## Unresolved: the ROM refuses to run this module's rt_Init, erratically
+## Unresolved as of 2026-09-01; resolved by 2026-09-11
+
+The table below never got an explanation - and then `ROMREG=1 WRITE=1
+DEBUG=12` worked, and has kept working. Whatever this was, it is not a
+live problem. Left in place because an erratic `rt_Init` that later
+stops being erratic is worth recognising if it comes back.
+
+### The symptom, as it was
 
 Whether `rt_Init` is called at all does not correlate with anything
 measurable about the module:
