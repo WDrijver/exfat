@@ -35,15 +35,14 @@
 #include "../libexfat/exfat.h"
 
 /* ------------------------------------------------------------------ */
-/* Build-time safety switch.                                          */
+/* Write support is unconditional.                                    */
 /*                                                                    */
-/* Milestone 1 is read-only: mount refuses read-write and the device  */
-/* layer refuses every write.  Do not turn this on until the byte     */
-/* swapping and the device layer have been proven against real media. */
+/* It was behind EXFAT_AMIGA_ALLOW_WRITE while the byte swapping and  */
+/* the device layer were being proven against real media.  They were: */
+/* an exFAT card mounts read-write from Kickstart and served Brian    */
+/* the Lion's 551 MB preload under load, 2026-09-11.  The switch is   */
+/* gone and the read-only branches with it.                           */
 /* ------------------------------------------------------------------ */
-#ifndef EXFAT_AMIGA_ALLOW_WRITE
-#define EXFAT_AMIGA_ALLOW_WRITE 0
-#endif
 
 /* Mount every partition found at startup so the volumes appear on Workbench
    straight away.  Build with ACTIVATE=0 to leave them to start on first

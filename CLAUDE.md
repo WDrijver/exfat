@@ -216,17 +216,19 @@ Two things worth carrying forward from getting here:
 
     cd amiga
     make clean
-    make ROMREG=1 DEBUG=12 WRITE=1        # 62,968 bytes - what is flashed
-    make clean && make ROMREG=1 WRITE=1   # 57,668, no serial trace
+    make DEBUG=12                 # 62,968 bytes - what is flashed
+    make clean && make            # 57,668, no serial trace
 
-**The switch is `ROMREG`.** `make ROMTAG=1` sets a variable nothing
-reads: the build comes out `ROMREG=0`, registers nothing, and sagasd
-says *"no FileSystem.resource entry for exFAT, loading L:exfat-handler
-instead"*. That is now a hard error in the Makefile rather than a quiet
-49,608-byte binary that looks like a build.
+**There are no `ROMREG` or `WRITE` switches any more.** Both were
+development scaffolding, both are proven, and both are now
+unconditional: the handler always registers `FATX` and always has the
+write path compiled in. `make WRITE=…`, `make ROMREG=…` and
+`make ROMTAG=…` are hard errors naming the replacement, because the old
+failure mode was a quiet 49,608-byte binary that looked like a build and
+registered nothing.
 
-**Check the size.** The flashable build is **62,968 bytes**. Anything
-else is a different configuration, whatever was typed.
+**Check the size.** The flashable build is **62,968 bytes** and the
+quiet one 57,668. Anything else is a different configuration.
 
 `build/exfat-handler` is the file Remus ingests.  `make clean` between
 switch combinations is not optional: the switches change what is
@@ -252,7 +254,7 @@ The phases behind that, in the order they were brought up:
   clean shutdown demonstrably clears the flag.
 - **Phase 2 (file writing): verified on hardware.**
   `FINDOUTPUT`, `FINDUPDATE`, `WRITE`, `SET_FILE_SIZE`, `SET_PROTECT`,
-  `SET_DATE`, and `END` flushing the directory entry.  `make WRITE=1` only.
+  `SET_DATE`, and `END` flushing the directory entry.
   Confirmed: create and write; on-volume copy; a 1 MB (four cluster) file
   round tripping byte-for-byte; `exfatfsck` clean afterwards, so FAT chains
   and the allocation bitmap agree.  Shrinking verified by measurement:
@@ -350,7 +352,7 @@ Three traps found getting there, all worth remembering:
   ~10 ms with multitasking off.  At TRACE level every packet pays that.  Use
   `DEBUG=6` unless actively debugging.
 
-Build switches: `WRITE=1` for read-write, `ACTIVATE=0` to leave published
+Build switches: `ACTIVATE=0` to leave published
 partitions to start on first access instead of at mount.
 
 ## sagasd.device integration
@@ -491,7 +493,8 @@ What still matters from it, regardless of ROM:
   locals, private allocator) is what makes the handler **reentrant**, which
   is what lets several partitions share one seglist.  That is exercised in
   normal use and must not be undone.
-- `ROMREG` defaults to 0, so the ROM tag registers nothing and costs nothing
+- registration is unconditional now; `ROMREG` is gone (it defaulted to 0,
+  so the ROM tag registered nothing and cost nothing)
   at run time; `rt_Init` is only ever called by a ROM boot scan.
 
 ## ROM residency: the module must be a Resident

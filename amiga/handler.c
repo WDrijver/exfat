@@ -828,7 +828,6 @@ static void do_fh_from_lock(struct ExfatHandler* h, struct DosPacket* pkt)
 	ReplyPkt(pkt, DOSTRUE, 0);
 }
 
-#if EXFAT_AMIGA_ALLOW_WRITE
 
 static void do_write(struct ExfatHandler* h, struct DosPacket* pkt)
 {
@@ -1317,7 +1316,6 @@ static void do_rename_disk(struct ExfatHandler* h, struct DosPacket* pkt)
 	ReplyPkt(pkt, DOSTRUE, 0);
 }
 
-#endif /* EXFAT_AMIGA_ALLOW_WRITE */
 
 /* Set or clear exFAT's VolumeDirty flag without unmounting.  This is what
    finalize_super_block() does internally; it touches only VolumeFlags, which
@@ -1426,7 +1424,6 @@ static void do_inhibit(struct ExfatHandler* h, struct DosPacket* pkt)
 	ReplyPkt(pkt, err ? DOSFALSE : DOSTRUE, err);
 }
 
-#if EXFAT_AMIGA_ALLOW_WRITE
 
 /* ACTION_FORMAT (1020).  Section 13.7.5: writes a blank file system onto the
    partition.  Only legal while inhibited - and this build additionally
@@ -1469,7 +1466,6 @@ static void do_format(struct ExfatHandler* h, struct DosPacket* pkt)
 	ReplyPkt(pkt, DOSTRUE, 0);
 }
 
-#endif /* EXFAT_AMIGA_ALLOW_WRITE */
 
 static void do_end(struct ExfatHandler* h, struct DosPacket* pkt)
 {
@@ -2003,11 +1999,7 @@ static BOOL mount_fs(struct ExfatHandler* h)
 
 	/* "ro_fallback" asks for read-write but accepts read-only if the medium
 	   or the build will not allow it; exfat_mount() then sets ef.ro. */
-#if EXFAT_AMIGA_ALLOW_WRITE
 	if (exfat_mount(&h->ef, (const char*)&h->spec, "ro_fallback,noatime") != 0)
-#else
-	if (exfat_mount(&h->ef, (const char*)&h->spec, "ro") != 0)
-#endif
 	{
 		Debug_Error("exfat_mount failed\n");
 		return FALSE;
@@ -2360,7 +2352,6 @@ LONG exfat_handler_main(void)
 			case ACTION_FINDINPUT:
 				do_open(h, pkt, OPEN_OLD);
 				break;
-#if EXFAT_AMIGA_ALLOW_WRITE
 			case ACTION_FINDOUTPUT:
 				do_open(h, pkt, OPEN_NEW);
 				break;
@@ -2397,7 +2388,6 @@ LONG exfat_handler_main(void)
 			case ACTION_RENAME_DISK:
 				do_rename_disk(h, pkt);
 				break;
-#endif
 			case ACTION_EXAMINE_FH:
 				do_examine_fh(h, pkt);
 				break;
@@ -2459,22 +2449,6 @@ LONG exfat_handler_main(void)
 			/* Read-only build: refuse the mutating packets explicitly so
 			   callers get ERROR_DISK_WRITE_PROTECTED rather than a
 			   confusing "action not known". */
-#if !EXFAT_AMIGA_ALLOW_WRITE
-			case ACTION_FINDOUTPUT:
-			case ACTION_FINDUPDATE:
-			case ACTION_WRITE:
-			case ACTION_SET_FILE_SIZE:
-			case ACTION_DELETE_OBJECT:
-			case ACTION_RENAME_OBJECT:
-			case ACTION_CREATE_DIR:
-			case ACTION_SET_PROTECT:
-			case ACTION_SET_DATE:
-			case ACTION_SET_COMMENT:
-#endif
-#if !EXFAT_AMIGA_ALLOW_WRITE
-			case ACTION_RENAME_DISK:
-			case ACTION_FORMAT:
-#endif
 				ReplyPkt(pkt, DOSFALSE, ERROR_DISK_WRITE_PROTECTED);
 				break;
 

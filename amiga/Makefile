@@ -24,7 +24,7 @@ export LC_ALL := C
 # the serial log and the rt_Version byte in the ROM say which build is
 # actually running.  1.0 is the first build in which ROM registration is
 # expected to work (coldstart priority above sagasd.device).
-VERSION ?= 1.4
+VERSION ?= 1.5
 
 BUILD_DATE := $(shell date +"%d.%m.%Y-%H.%M.%S")
 
@@ -85,10 +85,14 @@ ifdef DEBUG
 CFLAGS  += -DDEBUG=$(DEBUG)
 endif
 
-# Write support.  0 = read-only (the write path is compiled out entirely).
-# Do not set this to 1 against media you care about - see ../CLAUDE.md.
-WRITE ?= 0
-CFLAGS += -DEXFAT_AMIGA_ALLOW_WRITE=$(WRITE)
+# Write support is unconditional - there is no WRITE switch any more, and
+# no read-only branches left to select.  An exFAT card mounts read-write
+# from Kickstart and has served a 551 MB sustained read with concurrent
+# writes; see ../CLAUDE.md.
+ifdef WRITE
+$(error WRITE is gone - write support is always compiled in now.  \
+Just: make clean && make)
+endif
 
 # Mount every partition found at startup (1) or leave them until first
 # access (0).
@@ -107,10 +111,11 @@ LDFLAGS = -lc $(LIBGCC) -lc
 # ---- sources --------------------------------------------------------
 # entry.o MUST come first: AmigaDOS enters the handler at the first byte of
 # the loaded segment.
-AMIGA_SRCS   = handler.c dev_io.c amigaos.c parttable.c romtag.c
-ifeq ($(WRITE),1)
-AMIGA_SRCS  += format.c
-endif
+# format.c was conditional on WRITE; it is unconditional now, like the rest
+# of the write path.  Leaving it out is what an over-eager removal of that
+# switch does first: everything compiles and the link fails on
+# exfat_amiga_format.
+AMIGA_SRCS   = handler.c dev_io.c amigaos.c parttable.c romtag.c format.c
 LIBEXFAT_SRCS = cluster.c io.c log.c lookup.c mount.c node.c repair.c time.c \
                 utf.c utils.c
 # the mkfs engine, minus its command line front end (main.c)
@@ -120,9 +125,7 @@ APOLLO_SRCS  = ApolloCrossDev_Debug.c
 OBJ  = $(OBJDIR)/entry.o
 OBJ += $(addprefix $(OBJDIR)/,$(AMIGA_SRCS:%.c=%.o))
 OBJ += $(addprefix $(OBJDIR)/,$(LIBEXFAT_SRCS:%.c=%.o))
-ifeq ($(WRITE),1)
 OBJ += $(addprefix $(OBJDIR)/,$(MKFS_SRCS:%.c=%.o))
-endif
 OBJ += $(addprefix $(OBJDIR)/,$(APOLLO_SRCS:%.c=%.o))
 
 .PHONY: all clean tools
@@ -157,30 +160,22 @@ $(BUILDDIR)/$(TARGET): $(OBJ)
 
 # Whether the ROM tag registers the handler in FileSystem.resource.
 #
-# ROMREG=1 registers 'FATX' and is what you want for a ROM build: verified
-# on hardware 2026-09-11, mounting an exFAT card read-write from Kickstart
-# with no L:exfat-handler on any volume.  The default is still 0 because
-# that is the safe build - the module sits in the ROM registering nothing
-# and mounting goes through L:exfat-handler.
+# Registering 'FATX' in FileSystem.resource is unconditional - there is no
+# ROMREG switch any more.  It was optional while ROM residency was being
+# brought up; it has been proven on hardware since, and a ROM module that
+# registers nothing is inert.
 #
-# If sagasd's log says "no FileSystem.resource entry for exFAT", this
-# switch was off.
-# NOTE: changing this (or WRITE, or DEBUG) only alters CFLAGS - make has no
-# way to know the objects are stale, so it will relink without recompiling
-# and hand you a binary built with the PREVIOUS setting.  Always "make clean"
-# when changing a switch.  This has already produced one binary that was
-# labelled ROMREG=1 and was not.
+# If sagasd's log says "no FileSystem.resource entry for exFAT", that is
+# now a real fault rather than a build that was configured off.
+ifdef ROMREG
+$(error ROMREG is gone - the handler always registers now.  \
+Just: make clean && make)
+endif
 ifdef ROMTAG
-$(error The switch is ROMREG, not ROMTAG.  `make ROMTAG=1` sets a variable \
-nothing reads, so the build silently comes out with ROMREG=0 and registers \
-nothing - which shows up as "no FileSystem.resource entry for exFAT" in \
-sagasd's log.  Use: make clean && make ROMREG=1 DEBUG=12 WRITE=1)
+$(error There is no ROMTAG switch - and ROMREG is gone too, the handler \
+always registers now.  Just: make clean && make)
 endif
-
-ROMREG ?= 0
-ifneq ($(ROMREG),0)
 CFLAGS += -DEXFAT_ROMTAG_REGISTER
-endif
 
 # The coldstart priority.  It has to be ABOVE sagasd.device's, which is 5:
 # coldstart tags run in descending priority, and sagasd calls CheckUnit()

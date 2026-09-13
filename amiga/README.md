@@ -22,7 +22,7 @@ Not verified: **writing**, which remains compiled out.
 
 ```
 make                 # read-only handler + mbrscan + exfatctl
-make WRITE=1         # READ-WRITE handler - scratch media only
+make                 # read-write, registers FATX - both unconditional
 make DEBUG=7         # add INFO messages to the serial log
 make clean
 ```

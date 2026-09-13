@@ -114,12 +114,10 @@ const char exfat_rom_id[] =
 ULONG exfat_rom_init(void)
 {
 	EXFAT_SYSBASE;
-#ifdef EXFAT_ROMTAG_REGISTER
 	struct FileSysResource* fsr;
 	struct FileSysEntry* fse;
 	struct FileSysEntry* e;
 	struct ExfatRomSeg* seg;
-#endif
 
 	/* Raw first, then the normal path: if only the raw one appears, the
 	   fault is in Forbid()/RawDoFmt() at coldstart, not in rt_Init. */
@@ -144,17 +142,6 @@ ULONG exfat_rom_init(void)
 	Debug_Flag("exfat romtag: entry %08lx verified\n",
 			(ULONG)exfat_handler_entry);
 
-#ifndef EXFAT_ROMTAG_REGISTER
-	/* The default, and the only configuration proven on hardware: the
-	   module is a well-formed ROM member that registers nothing.  Mounting
-	   goes through L:exfat-handler as it always has.
-
-	   Registering (make ROMREG=1) is what is still being brought up; see
-	   ../CLAUDE.md, "ROM residency", for where that stands. */
-	Debug_Flag("exfat romtag: present, not registering "
-			"(build with ROMREG=1 to register)\n");
-	return 0;
-#else
 
 	rom_mark("calling OpenResource");
 	fsr = (struct FileSysResource*)OpenResource(FSRNAME);
@@ -299,5 +286,4 @@ registered:				/* only the fat95 path jumps here */
 			(ULONG)exfat_handler_entry);
 	rom_mark("registered - rt_Init complete");
 	return 0;
-#endif /* EXFAT_ROMTAG_REGISTER */
 }

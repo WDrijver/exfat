@@ -332,14 +332,6 @@ struct exfat_dev* exfat_open(const char* spec, enum exfat_mode mode)
 		return NULL;
 	}
 
-#if !EXFAT_AMIGA_ALLOW_WRITE
-	if (mode == EXFAT_MODE_RW)
-	{
-		exfat_error("this build is read-only");
-		return NULL;
-	}
-	mode = EXFAT_MODE_RO;
-#endif
 
 	dev = AllocVec(sizeof(struct exfat_dev), MEMF_ANY | MEMF_CLEAR);
 	if (dev == NULL)
@@ -410,7 +402,6 @@ struct exfat_dev* exfat_open(const char* spec, enum exfat_mode mode)
 
 	probe_commands(dev);
 
-#if EXFAT_AMIGA_ALLOW_WRITE
 	/* A physically write-protected card must degrade to a read-only mount
 	   rather than failing every write later on. */
 	if (dev->mode != EXFAT_MODE_RO)
@@ -427,7 +418,6 @@ struct exfat_dev* exfat_open(const char* spec, enum exfat_mode mode)
 			dev->mode = EXFAT_MODE_RO;
 		}
 	}
-#endif
 
 	Debug_Info("opened %s unit %lu: %lu byte blocks, partition at %lu:%lu, "
 			"%lu:%lu bytes\n",
@@ -521,17 +511,11 @@ ssize_t exfat_read(struct exfat_dev* dev, void* buffer, size_t size)
 ssize_t exfat_write(struct exfat_dev* dev, const void* buffer, size_t size)
 {
 	EXFAT_SYSBASE;
-#if EXFAT_AMIGA_ALLOW_WRITE
 	ssize_t n = partition_io(dev, TRUE, (void*)buffer, size, dev->pos);
 
 	if (n > 0)
 		dev->pos += n;
 	return n;
-#else
-	(void)dev; (void)buffer; (void)size;
-	exfat_error("write attempted on a read-only build");
-	return -1;
-#endif
 }
 
 ssize_t exfat_pread(struct exfat_dev* dev, void* buffer, size_t size,
@@ -545,11 +529,5 @@ ssize_t exfat_pwrite(struct exfat_dev* dev, const void* buffer, size_t size,
 		exfat_off_t offset)
 {
 	EXFAT_SYSBASE;
-#if EXFAT_AMIGA_ALLOW_WRITE
 	return partition_io(dev, TRUE, (void*)buffer, size, offset);
-#else
-	(void)dev; (void)buffer; (void)size; (void)offset;
-	exfat_error("write attempted on a read-only build");
-	return -1;
-#endif
 }
