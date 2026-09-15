@@ -248,7 +248,10 @@ Close any Workbench window on the volume and `CD` elsewhere, then retry.
 If something will not let go, **`exfatctl SDROM0: inhibit`** is the safe way
 out: it flushes everything and clears `VolumeDirty` without the handler
 exiting, so the card can be removed and will not need checking on the next
-host. `uninhibit` resumes. Writes are refused while inhibited.
+host. `uninhibit` resumes. Nothing touches the medium while inhibited: reads
+and writes alike are refused with "not a DOS disk", and uninhibit re-validates
+the medium as §13.9.2 requires - a different card than the one the open locks
+belong to is refused and the handler stays inhibited until they are closed.
 
 ## Write bring-up (Phase 1)
 
@@ -385,11 +388,13 @@ range against `mbrscan` first before suspecting the file system.
   `FileInfoBlock` carries only `fib_Date` (mtime) — so letting libexfat
   update atime on every read would dirty the node and cost a metadata write
   per read, for nothing. Bad for SD wear and speed.
-- **`ACTION_INHIBIT` is partial.** It flushes, clears `VolumeDirty`, reports
-  `'BUSY'` per Table 5.6 and refuses writes — enough to park a volume safely.
-  But reads are not blocked, and uninhibiting does not re-validate the medium
-  as §13.9.2 requires. Do not use it to hand the raw device to another
-  program such as `Format`.
+- **`ACTION_INHIBIT` is the card-swap mechanism.** The handler has no change
+  interrupt; sagasd.device inhibits it when the card is pulled and uninhibits
+  it when one returns, and §13.9.2 defines that pair as a simulated medium
+  change. While inhibited nothing touches the medium (reads, writes and
+  lookups are refused; INFO says `'BUSY'`); uninhibit re-mounts from scratch
+  when nothing was open, or, with locks still open, resumes only if the boot
+  sector proves it is the same volume.
 - **`id_DiskType` is not the file system's DOSType.** It reports
   `ID_DOS_DISK` ("we recognise this medium"), per §5.2.4, which says
   explicitly that it "shall not be used to identify a particular file

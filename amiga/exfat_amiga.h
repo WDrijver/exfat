@@ -153,6 +153,7 @@ struct ExfatHandler
 	BSTR			volname_orig;	/* the one MakeDosEntry made  */
 	struct ExfatDevSpec	spec;
 	ULONG			lowcyl;		/* de_LowCyl we were given */
+	struct DosEnvec*	envec;		/* our node's environment, to re-derive spec */
 	struct exfat		ef;
 	BOOL			mounted;
 	BOOL			inhibited;

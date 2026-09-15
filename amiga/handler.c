@@ -72,6 +72,8 @@ static BOOL mount_fs(struct ExfatHandler* h);
 static void unmount_fs(struct ExfatHandler* h);
 static void add_volume(struct ExfatHandler* h);
 static void remove_volume(struct ExfatHandler* h);
+static void spec_from_envec(struct ExfatHandler* h);
+static BOOL resolve_extent(struct ExfatHandler* h, BOOL publish);
 
 /* ------------------------------------------------------------------ */
 /* Locks                                                              */
@@ -1346,15 +1348,37 @@ static LONG set_volume_dirty(struct ExfatHandler* h, BOOL dirty)
 }
 
 /* ACTION_INHIBIT (31).  Section 13.9.2: an inhibited file system stops
-   touching the medium and reports 'BUSY'.  Used here as the safe way to park
-   a volume when ACTION_DIE is refused because locks are still outstanding -
-   flush everything and clear the dirty flag, so the card can be removed and
-   will not need checking on the next host.
+   touching the medium and reports 'BUSY'; once uninhibited it "shall
+   perform a validation of the medium as if the medium has been re-inserted"
+   - inhibit + uninhibit is how DiskChange simulates a medium change, and it
+   is how sagasd.device parks this handler when its card is pulled and wakes
+   it when one comes back.  This handler has no change interrupt of its own,
+   so that pair is the only way it ever learns about a swap.
 
-   NOTE: this is a partial implementation.  Writes are refused while
-   inhibited, but reads are not blocked, and uninhibiting does not re-validate
-   the medium as the section requires.  Do not use it to hand the raw device
-   to another program. */
+   Inhibit:
+   - nothing holds the volume: let go of it completely (volume node gone,
+     medium closed).  Uninhibit then mounts from scratch, which is the full
+     re-validation the section asks for, and it is what ACTION_FORMAT needs.
+   - locks or files are still open: a full unmount would leave them pointing
+     at freed nodes, so the mount is parked in memory: flushed and marked
+     clean, and from here on nothing reads or writes the medium (the packet
+     loop refuses every medium-touching packet while inhibited, and
+     ACTION_END does not flush).  The moment the last lock or file goes,
+     release_if_idle() completes the release, so the next uninhibit is a
+     clean mount after all.
+
+   Uninhibit:
+   - released: re-derive the extent from the DosEnvec (resolve_extent()
+     narrows it in place, so it cannot be reused), find the volume again and
+     mount it.  Failure leaves the handler inhibited and answers
+     ERROR_NOT_A_DOS_DISK - the card in the slot is not one for us.
+   - parked: the medium is re-read and compared with what was mounted
+     (serial, geometry, root).  The same volume resumes; a different one is
+     refused with ERROR_OBJECT_IN_USE and the handler stays inhibited,
+     because the open locks describe the old volume and serving the new one
+     through them would corrupt it.  That handler wakes once its locks are
+     gone.  Like every classic file system, a resumed park trusts the
+     volume not to have been modified elsewhere in the meantime. */
 static void do_inhibit(struct ExfatHandler* h, struct DosPacket* pkt)
 {
 	EXFAT_BASES(h);
@@ -1365,19 +1389,11 @@ static void do_inhibit(struct ExfatHandler* h, struct DosPacket* pkt)
 	{
 		if (h->nlocks == 0 && h->nfiles == 0)
 		{
-			/* Nothing is holding the volume, so let go of it completely.
-			   This is what section 13.9.2 means by simulating a medium
-			   change, and ACTION_FORMAT requires it: the on-disk structure
-			   is about to be replaced, so no cached state may survive. */
 			remove_volume(h);
 			unmount_fs(h);
 		}
 		else
 		{
-			/* Something still holds a lock or an open file, so a full
-			   unmount would leave those pointing at freed nodes.  Park the
-			   volume instead: flush and clear the dirty flag so the card is
-			   safe to remove, but keep the mount in memory. */
 			if (!h->ef.ro)
 			{
 				if (exfat_flush_nodes(&h->ef) != 0 ||
@@ -1400,20 +1416,43 @@ static void do_inhibit(struct ExfatHandler* h, struct DosPacket* pkt)
 	}
 	else if (!on && h->inhibited)
 	{
-		/* Re-validate as if the medium had been re-inserted (13.9.2): after
-		   ACTION_FORMAT the structure on disk is a different volume. */
 		if (!h->mounted)
 		{
-			if (!mount_fs(h))
+			spec_from_envec(h);
+			if (!resolve_extent(h, FALSE) || !mount_fs(h))
 			{
-				Debug_Error("could not re-mount after uninhibit\n");
+				Debug_Error("uninhibit: no exFAT volume to re-mount, staying "
+						"inhibited\n");
 				ReplyPkt(pkt, DOSFALSE, ERROR_NOT_A_DOS_DISK);
 				return;
 			}
 			add_volume(h);
 		}
 		else
+		{
+			struct exfat_super_block sb;
+			const struct exfat_super_block* old = h->ef.sb;
+
+			if (exfat_pread(h->ef.dev, &sb, sizeof(sb), 0) !=
+						(ssize_t)sizeof(sb) ||
+					memcmp(sb.oem_name, "EXFAT   ", 8) != 0 ||
+					le32_to_cpu(sb.volume_serial) != le32_to_cpu(old->volume_serial) ||
+					sb.sector_bits != old->sector_bits ||
+					sb.spc_bits != old->spc_bits ||
+					le32_to_cpu(sb.cluster_count) != le32_to_cpu(old->cluster_count) ||
+					le32_to_cpu(sb.rootdir_cluster) != le32_to_cpu(old->rootdir_cluster))
+			{
+				Debug_Error("uninhibit: the medium is not the volume that "
+						"%lu locks and %lu files are open on - staying "
+						"inhibited until they are closed\n",
+						(ULONG)h->nlocks, (ULONG)h->nfiles);
+				ReplyPkt(pkt, DOSFALSE, ERROR_OBJECT_IN_USE);
+				return;
+			}
+			Debug_Info("uninhibit: same volume is back, resuming the parked "
+					"mount\n");
 			err = set_volume_dirty(h, TRUE);
+		}
 
 		if (err == 0)
 		{
@@ -1422,6 +1461,56 @@ static void do_inhibit(struct ExfatHandler* h, struct DosPacket* pkt)
 		}
 	}
 	ReplyPkt(pkt, err ? DOSFALSE : DOSTRUE, err);
+}
+
+/* A parked, inhibited mount whose last lock or file has just gone can now
+   be released for real, so the next uninhibit is a clean re-mount. */
+static void release_if_idle(struct ExfatHandler* h)
+{
+	EXFAT_BASES(h);
+	if (h->inhibited && h->mounted && h->nlocks == 0 && h->nfiles == 0)
+	{
+		Debug_Info("inhibited and no longer in use: releasing the volume\n");
+		remove_volume(h);
+		unmount_fs(h);
+	}
+}
+
+/* The packets an inhibited file system must not serve: every one that
+   reads or writes the medium, or hands out something that would.  What is
+   left - freeing locks, closing files, INFO ('BUSY'), FLUSH (a no-op),
+   INHIBIT, DIE, FORMAT - keeps working. */
+static BOOL needs_medium(LONG type)
+{
+	switch (type)
+	{
+	case ACTION_LOCATE_OBJECT:
+	case ACTION_COPY_DIR:
+	case ACTION_COPY_DIR_FH:
+	case ACTION_PARENT:
+	case ACTION_PARENT_FH:
+	case ACTION_EXAMINE_OBJECT:
+	case ACTION_EXAMINE_NEXT:
+	case ACTION_EXAMINE_FH:
+	case ACTION_FINDINPUT:
+	case ACTION_FINDOUTPUT:
+	case ACTION_FINDUPDATE:
+	case ACTION_FH_FROM_LOCK:
+	case ACTION_READ:
+	case ACTION_WRITE:
+	case ACTION_SEEK:
+	case ACTION_SET_FILE_SIZE:
+	case ACTION_SET_PROTECT:
+	case ACTION_SET_DATE:
+	case ACTION_SET_COMMENT:
+	case ACTION_DELETE_OBJECT:
+	case ACTION_CREATE_DIR:
+	case ACTION_RENAME_OBJECT:
+	case ACTION_RENAME_DISK:
+		return TRUE;
+	default:
+		return FALSE;
+	}
 }
 
 
@@ -1477,8 +1566,11 @@ static void do_end(struct ExfatHandler* h, struct DosPacket* pkt)
 	if (file != NULL)
 	{
 		/* Commit the directory entry before letting go of the file: size
-		   and timestamps live there, not in the data clusters. */
-		if (!h->ef.ro)
+		   and timestamps live there, not in the data clusters.  Not while
+		   inhibited: everything was flushed when the park began and
+		   nothing has been written since, and the medium in the slot may
+		   by now be a different card. */
+		if (!h->ef.ro && !h->inhibited)
 		{
 			if (exfat_flush_node(&h->ef, file->node) != 0)
 				err = ERROR_DISK_FULL;
@@ -1569,10 +1661,22 @@ static void do_seek(struct ExfatHandler* h, struct DosPacket* pkt)
 static void fill_infodata(struct ExfatHandler* h, struct InfoData* id)
 {
 	EXFAT_BASES(h);
-	uint32_t total = le32_to_cpu(h->ef.sb->cluster_count);
-	uint32_t freec = exfat_count_free_clusters(&h->ef);
+	uint32_t total;
+	uint32_t freec;
 
 	memset(id, 0, sizeof(struct InfoData));
+	if (!h->mounted)
+	{
+		/* Inhibited and released: no medium, no superblock.  'BUSY' with
+		   nothing else is what an inhibited FFS reports too. */
+		id->id_UnitNumber = (LONG)h->spec.unit;
+		id->id_DiskState = ID_VALIDATED;
+		id->id_DiskType = EXFAT_ID_BUSY;
+		return;
+	}
+	total = le32_to_cpu(h->ef.sb->cluster_count);
+	freec = exfat_count_free_clusters(&h->ef);
+
 	id->id_NumSoftErrors = 0;
 	id->id_UnitNumber = (LONG)h->spec.unit;
 	id->id_DiskState = h->ef.ro ? ID_WRITE_PROTECTED : ID_VALIDATED;
@@ -1779,7 +1883,7 @@ static BOOL publish_partition(struct ExfatHandler* h, int idx,
    also what every node published above will see.  Otherwise look for a
    partition table, take the first exFAT partition for ourselves and publish
    nodes for the rest. */
-static BOOL resolve_extent(struct ExfatHandler* h)
+static BOOL resolve_extent(struct ExfatHandler* h, BOOL publish)
 {
 	EXFAT_BASES(h);
 	struct ExfatPartition parts[EXFAT_MAX_PARTITIONS];
@@ -1823,9 +1927,15 @@ static BOOL resolve_extent(struct ExfatHandler* h)
 	h->spec.firstbyte += parts[0].first_lba * (uint64_t)h->spec.blocksize;
 	h->spec.length = parts[0].sectors * (uint64_t)h->spec.blocksize;
 
-	/* The rest become device nodes of their own. */
-	for (i = 1; i < n; i++)
-		publish_partition(h, i, &parts[i]);
+	/* The rest become device nodes of their own - at startup.  On a
+	   re-validation after uninhibit the siblings published then still
+	   exist (each is a handler of its own, inhibited and uninhibited by
+	   the mounter like this one), so nothing is published again; a card
+	   swapped in with a different multi-partition layout is served on its
+	   first partition only. */
+	if (publish)
+		for (i = 1; i < n; i++)
+			publish_partition(h, i, &parts[i]);
 
 	return TRUE;
 }
@@ -1902,15 +2012,44 @@ static void release_partition(struct ExfatHandler* h)
 /* Startup                                                            */
 /* ------------------------------------------------------------------ */
 
+/* The extent we were mounted on, from the DosEnvec and nothing else - no
+   MBR, GPT or RDB parsing here, and the exFAT boot sector's own
+   PartitionOffset is ignored.  See ../CLAUDE.md, decision 1.  Called at
+   startup, and again before a re-validation, because resolve_extent()
+   narrows the spec in place. */
+static void spec_from_envec(struct ExfatHandler* h)
+{
+	EXFAT_BASES(h);
+	struct DosEnvec* de = h->envec;
+	uint64_t blocks_per_cyl;
+	uint64_t first_block;
+	uint64_t block_count;
+
+	h->spec.blocksize = de->de_SizeBlock * 4;
+	h->spec.maxtransfer = de->de_MaxTransfer;
+	h->spec.mask = de->de_Mask;
+
+	blocks_per_cyl = (uint64_t)de->de_Surfaces * (uint64_t)de->de_BlocksPerTrack;
+	first_block = (uint64_t)de->de_LowCyl * blocks_per_cyl;
+	block_count = ((uint64_t)de->de_HighCyl - (uint64_t)de->de_LowCyl + 1) *
+			blocks_per_cyl;
+
+	h->lowcyl = de->de_LowCyl;
+	h->spec.firstbyte = first_block * (uint64_t)h->spec.blocksize;
+	h->spec.length = block_count * (uint64_t)h->spec.blocksize;
+
+	Debug_Info("mounting %s unit %lu: lowcyl %lu highcyl %lu, %lu blocks of "
+			"%lu bytes\n", h->spec.devname, (ULONG)h->spec.unit,
+			(ULONG)de->de_LowCyl, (ULONG)de->de_HighCyl,
+			(ULONG)block_count, (ULONG)h->spec.blocksize);
+}
+
 static BOOL startup(struct ExfatHandler* h, struct DosPacket* pkt)
 {
 	EXFAT_BASES(h);
 	struct FileSysStartupMsg* fssm;
 	struct DosEnvec* de;
 	const char* devname;
-	uint64_t blocks_per_cyl;
-	uint64_t first_block;
-	uint64_t block_count;
 
 	h->devlist = (struct DosList*)BADDR(pkt->dp_Arg3);
 	fssm = (struct FileSysStartupMsg*)BADDR(pkt->dp_Arg2);
@@ -1940,31 +2079,13 @@ static BOOL startup(struct ExfatHandler* h, struct DosPacket* pkt)
 	h->spec.devname = devname;
 	h->spec.unit = fssm->fssm_Unit;
 	h->spec.flags = fssm->fssm_Flags;
-	h->spec.blocksize = de->de_SizeBlock * 4;
-	h->spec.maxtransfer = de->de_MaxTransfer;
-	h->spec.mask = de->de_Mask;
-
-	/* The partition extent comes from the DosEnvec and nothing else - no
-	   MBR, GPT or RDB parsing here, and the exFAT boot sector's own
-	   PartitionOffset is ignored.  See ../CLAUDE.md, decision 1. */
-	blocks_per_cyl = (uint64_t)de->de_Surfaces * (uint64_t)de->de_BlocksPerTrack;
-	first_block = (uint64_t)de->de_LowCyl * blocks_per_cyl;
-	block_count = ((uint64_t)de->de_HighCyl - (uint64_t)de->de_LowCyl + 1) *
-			blocks_per_cyl;
-
-	h->lowcyl = de->de_LowCyl;
+	h->envec = de;
 	h->next_name_idx = 1;
-	h->spec.firstbyte = first_block * (uint64_t)h->spec.blocksize;
-	h->spec.length = block_count * (uint64_t)h->spec.blocksize;
-
-	Debug_Info("mounting %s unit %lu: lowcyl %lu highcyl %lu, %lu blocks of "
-			"%lu bytes\n", devname, (ULONG)h->spec.unit,
-			(ULONG)de->de_LowCyl, (ULONG)de->de_HighCyl,
-			(ULONG)block_count, (ULONG)h->spec.blocksize);
+	spec_from_envec(h);
 
 	/* We may have been mounted on a whole device rather than a partition;
 	   work out which, and publish nodes for any other exFAT partitions. */
-	if (!resolve_extent(h))
+	if (!resolve_extent(h, TRUE))
 	{
 		Debug_Error("no exFAT volume found on this device or partition\n");
 		return FALSE;
@@ -2309,6 +2430,17 @@ LONG exfat_handler_main(void)
 							"StackSize in the mount file\n", headroom);
 			}
 
+			if (h->inhibited && needs_medium(pkt->dp_Type))
+			{
+				/* READ, WRITE and SEEK report failure as -1 in Res1; the
+				   rest use DOSFALSE. */
+				BOOL rws = (pkt->dp_Type == ACTION_READ ||
+						pkt->dp_Type == ACTION_WRITE ||
+						pkt->dp_Type == ACTION_SEEK);
+				ReplyPkt(pkt, rws ? -1 : DOSFALSE, ERROR_NOT_A_DOS_DISK);
+				continue;
+			}
+
 			switch (pkt->dp_Type)
 			{
 			case ACTION_LOCATE_OBJECT:
@@ -2318,6 +2450,7 @@ LONG exfat_handler_main(void)
 				exfat_amiga_freelock(h,
 						exfat_amiga_lock_from_bptr((BPTR)pkt->dp_Arg1));
 				ReplyPkt(pkt, DOSTRUE, 0);
+				release_if_idle(h);
 				break;
 			case ACTION_COPY_DIR:
 				do_copy_dir(h, pkt);
@@ -2396,6 +2529,7 @@ LONG exfat_handler_main(void)
 				break;
 			case ACTION_END:
 				do_end(h, pkt);
+				release_if_idle(h);
 				break;
 			case ACTION_READ:
 				do_read(h, pkt);
@@ -2421,7 +2555,9 @@ LONG exfat_handler_main(void)
 			{
 				LONG err = 0;
 
-				if (!h->ef.ro)
+				/* Inhibited: flushed when the park began, and the medium
+				   is off limits.  Released: nothing to flush. */
+				if (!h->ef.ro && h->mounted && !h->inhibited)
 				{
 					if (exfat_flush_nodes(&h->ef) != 0 ||
 							exfat_flush(&h->ef) != 0)
@@ -2464,7 +2600,7 @@ LONG exfat_handler_main(void)
 	remove_volume(h);
 	if (h->devlist != NULL)
 		h->devlist->dol_Task = NULL;
-	exfat_unmount(&h->ef);
+	unmount_fs(h);			/* no-op if an inhibit already released it */
 	release_partition(h);
 	CloseLibrary((struct Library*)DOSBase);
 	FreeVec(h);

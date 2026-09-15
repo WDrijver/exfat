@@ -949,9 +949,32 @@ All verified on hardware:
 - `ACTION_DIE`, which flushes first and aborts if that flush fails rather
   than exiting with data possibly unwritten.
 
-Still partial **by design**: inhibit does not block reads and uninhibit does
-not re-validate the medium as section 13.9.2 requires, so it must not be used
-to hand the raw device to another program such as `Format`.
+## Inhibit is the card-swap mechanism (1.6)
+
+This handler has no change interrupt.  The only way it learns that its card
+was pulled or that one came back is the inhibit/uninhibit pair sagasd.device
+sends around the swap - which section 13.9.2 defines as "equivalent to
+simulating a medium change".  So inhibit is complete, not partial, since 1.6:
+
+- **Inhibited means off the medium.**  The packet loop refuses every
+  medium-touching packet (`needs_medium()`) with `ERROR_NOT_A_DOS_DISK`
+  (`-1` in Res1 for READ/WRITE/SEEK); `ACTION_END` does not flush;
+  `ACTION_FLUSH` is a no-op; INFO reports `'BUSY'`.  What still works is
+  freeing locks, closing files, INHIBIT, DIE and FORMAT.
+- **Nothing open: released.**  Volume node removed, medium closed.
+  Uninhibit re-derives the extent from the DosEnvec (`spec_from_envec()` -
+  `resolve_extent()` narrows the spec in place, so it cannot be reused) and
+  mounts from scratch: the full re-validation.  Sibling partitions are not
+  re-published on that path.
+- **Something open: parked.**  Flushed, marked clean, mount kept so the
+  locks stay valid.  Uninhibit re-reads the boot sector and compares serial,
+  sector/cluster bits, cluster count and root cluster with the mounted
+  superblock: the same volume resumes, a different one is refused with
+  `ERROR_OBJECT_IN_USE` and the handler stays inhibited - the locks describe
+  the old volume.  `release_if_idle()` completes the release the moment the
+  last lock or file goes, so the next uninhibit is a clean mount.
+- A resumed park trusts the volume not to have been modified elsewhere in
+  between, like every classic file system does.
 
 ## Write-phase choices (provisional, revisit before general use)
 
