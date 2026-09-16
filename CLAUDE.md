@@ -973,7 +973,9 @@ simulating a medium change".  So inhibit is complete, not partial, since 1.6:
   `Lock()`, after the uninhibit packet has been replied.  A single-partition
   card followed by a three-partition one mounts all three - verified on the
   V4 with sagasd.device 2.38 on 2026-09-16, including repeated swaps between
-  single- and multi-partition cards.  Sibling names stay `SDROM1`, `SDROM2`
+  single- and multi-partition cards; with 1.9, a window open on a partition
+  at eject time followed by a different card - window and both icons go,
+  the other card mounts.  Sibling names stay `SDROM1`, `SDROM2`
   (parent name with the trailing digit replaced, walking forward past taken
   names); decided to keep that convention.
 - **Something open: parked - and detached (1.9).**  Flushed as far as the
