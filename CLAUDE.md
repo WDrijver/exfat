@@ -982,7 +982,8 @@ simulating a medium change".  So inhibit is complete, not partial, since 1.6:
   superblock: the same volume resumes, a different one is refused with
   `ERROR_OBJECT_IN_USE` and the handler stays inhibited - the locks describe
   the old volume.  `release_if_idle()` completes the release the moment the
-  last lock or file goes, so the next uninhibit is a clean mount.
+  last lock or file goes - through `release_mount()`, so a card swapped in
+  meanwhile is never written - and the next uninhibit is a clean mount.
 - A resumed park trusts the volume not to have been modified elsewhere in
   between, like every classic file system does.
 
