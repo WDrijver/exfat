@@ -964,8 +964,14 @@ simulating a medium change".  So inhibit is complete, not partial, since 1.6:
 - **Nothing open: released.**  Volume node removed, medium closed.
   Uninhibit re-derives the extent from the DosEnvec (`spec_from_envec()` -
   `resolve_extent()` narrows the spec in place, so it cannot be reused) and
-  mounts from scratch: the full re-validation.  Sibling partitions are not
-  re-published on that path.
+  mounts from scratch: the full re-validation.  **Siblings are re-validated
+  too**, by the primary, because only it reads the partition table: each
+  extra partition is matched by extent against the nodes already on the
+  device/unit (`find_sibling_node()` - a sibling published for an earlier
+  card, parked by the mounter) and woken, or published if there is none;
+  the activation process then sends every name `Inhibit(FALSE)` and a
+  `Lock()`, after the uninhibit packet has been replied.  A single-partition
+  card followed by a three-partition one mounts all three.
 - **Something open: parked.**  Flushed, marked clean, mount kept so the
   locks stay valid.  Uninhibit re-reads the boot sector and compares serial,
   sector/cluster bits, cluster count and root cluster with the mounted

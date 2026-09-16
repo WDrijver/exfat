@@ -74,6 +74,7 @@ static void add_volume(struct ExfatHandler* h);
 static void remove_volume(struct ExfatHandler* h);
 static void spec_from_envec(struct ExfatHandler* h);
 static BOOL resolve_extent(struct ExfatHandler* h, BOOL publish);
+static void activate_partitions(struct ExfatHandler* h);
 
 /* ------------------------------------------------------------------ */
 /* Locks                                                              */
@@ -1427,6 +1428,14 @@ static void do_inhibit(struct ExfatHandler* h, struct DosPacket* pkt)
 				return;
 			}
 			add_volume(h);
+			h->inhibited = FALSE;
+			Debug_Info("uninhibited: re-mounted\n");
+			/* Reply before waking the siblings: the activation process
+			   locks their names, and the sender may be holding what that
+			   needs.  Same rule as at startup. */
+			ReplyPkt(pkt, DOSTRUE, 0);
+			activate_partitions(h);
+			return;
 		}
 		else
 		{
@@ -1731,8 +1740,48 @@ static void sibling_name(struct ExfatHandler* h, char* out, int size, int idx)
 
    Geometry is one block per cylinder (Surfaces = BlocksPerTrack = 1) so
    LowCyl/HighCyl are plain LBAs and any partition range is expressible. */
-static BOOL publish_partition(struct ExfatHandler* h, int idx,
+/* A node already on our device and unit that covers exactly this
+   partition - a sibling published for an earlier card and parked by the
+   mounter when that card went.  Only looked for on re-validation: at
+   startup the DOS list is held by whoever is starting us (12.1.2). */
+static struct DeviceNode* find_sibling_node(struct ExfatHandler* h,
 		const struct ExfatPartition* part)
+{
+	EXFAT_BASES(h);
+	struct DeviceNode* found = NULL;
+	struct DosList* dl = LockDosList(LDF_DEVICES | LDF_READ);
+
+	while ((dl = NextDosEntry(dl, LDF_DEVICES)) != NULL)
+	{
+		struct DeviceNode* dn = (struct DeviceNode*)dl;
+		struct FileSysStartupMsg* fssm =
+				(struct FileSysStartupMsg*)BADDR(dn->dn_Startup);
+		struct DosEnvec* de;
+		const char* dev;
+
+		if (fssm == NULL || fssm->fssm_Unit != h->spec.unit ||
+				fssm->fssm_Device == 0)
+			continue;
+		dev = (const char*)BADDR(fssm->fssm_Device) + 1;
+		if (strcmp(dev, h->spec.devname) != 0)
+			continue;
+		de = (struct DosEnvec*)BADDR(fssm->fssm_Environ);
+		if (de == NULL || de->de_TableSize < DE_DOSTYPE)
+			continue;
+		if (de->de_DosType != EXFAT_DOSTYPE || de->de_Surfaces != 1 ||
+				de->de_BlocksPerTrack != 1 ||
+				de->de_LowCyl != (ULONG)part->first_lba ||
+				de->de_HighCyl != (ULONG)(part->first_lba + part->sectors - 1))
+			continue;
+		found = dn;
+		break;
+	}
+	UnLockDosList(LDF_DEVICES | LDF_READ);
+	return found;
+}
+
+static BOOL publish_partition(struct ExfatHandler* h, int idx,
+		const struct ExfatPartition* part, BOOL revalidating)
 {
 	EXFAT_BASES(h);
 	struct ExpansionBase* ExpansionBase;
@@ -1741,6 +1790,29 @@ static BOOL publish_partition(struct ExfatHandler* h, int idx,
 	ULONG pp[4 + DE_BOOTBLOCKS + 1];
 
 	int attempt;
+
+	if (revalidating)
+	{
+		struct DeviceNode* old = find_sibling_node(h, part);
+
+		if (old != NULL)
+		{
+			const UBYTE* bn = (const UBYTE*)BADDR(old->dn_Name);
+			int len = bn[0] < 32 ? bn[0] : 32;
+
+			if (h->npublished < EXFAT_MAX_PARTITIONS)
+			{
+				memcpy(h->published[h->npublished], bn + 1, len);
+				h->published[h->npublished][len] = ':';
+				h->published[h->npublished][len + 1] = '\0';
+				h->npublished++;
+			}
+			Debug_Info("sibling %.*s for LBA %lu is already published "
+					"(handler port %08lx); it will be woken\n", len, bn + 1,
+					(ULONG)part->first_lba, (ULONG)old->dn_Task);
+			return TRUE;
+		}
+	}
 
 	ExpansionBase = (struct ExpansionBase*)OpenLibrary("expansion.library", 36);
 	if (ExpansionBase == NULL)
@@ -1897,6 +1969,10 @@ static BOOL resolve_extent(struct ExfatHandler* h, BOOL publish)
 	   file naming a specific partition.  Skip the scan entirely: it would
 	   only open the device a second time, re-probe NSD and read one sector
 	   to conclude what the mount file already told us. */
+	/* The names to wake belong to this scan alone: a card with fewer
+	   partitions than the last one must not wake the last one's leftovers. */
+	h->npublished = 0;
+
 	if (h->lowcyl != 0)
 	{
 		Debug_Info("mounted on a partition (LowCyl %lu), not scanning for a "
@@ -1927,15 +2003,15 @@ static BOOL resolve_extent(struct ExfatHandler* h, BOOL publish)
 	h->spec.firstbyte += parts[0].first_lba * (uint64_t)h->spec.blocksize;
 	h->spec.length = parts[0].sectors * (uint64_t)h->spec.blocksize;
 
-	/* The rest become device nodes of their own - at startup.  On a
-	   re-validation after uninhibit the siblings published then still
-	   exist (each is a handler of its own, inhibited and uninhibited by
-	   the mounter like this one), so nothing is published again; a card
-	   swapped in with a different multi-partition layout is served on its
-	   first partition only. */
-	if (publish)
-		for (i = 1; i < n; i++)
-			publish_partition(h, i, &parts[i]);
+	/* The rest become device nodes of their own.  On a re-validation
+	   after uninhibit (publish FALSE) a sibling published on an earlier
+	   card may still be there, parked by the mounter - it is found by its
+	   extent and woken instead of published twice; a partition without a
+	   node gets one.  Either way the names end up in h->published for
+	   activate_partitions() to wake, which the caller runs once the
+	   packet has been replied. */
+	for (i = 1; i < n; i++)
+		publish_partition(h, i, &parts[i], !publish);
 
 	return TRUE;
 }
@@ -2084,7 +2160,9 @@ static BOOL startup(struct ExfatHandler* h, struct DosPacket* pkt)
 	spec_from_envec(h);
 
 	/* We may have been mounted on a whole device rather than a partition;
-	   work out which, and publish nodes for any other exFAT partitions. */
+	   work out which, and publish nodes for any other exFAT partitions.
+	   (publish TRUE: no DOS list lookups here - whoever is starting us
+	   holds the list, 12.1.2.) */
 	if (!resolve_extent(h, TRUE))
 	{
 		Debug_Error("no exFAT volume found on this device or partition\n");
@@ -2279,7 +2357,18 @@ static UNUSED void activation_proc(void)
 
 	for (i = 0; i < am->count; i++)
 	{
-		BPTR lock = Lock((CONST_STRPTR)am->names[i], SHARED_LOCK);
+		BPTR lock;
+
+		/* A sibling parked by the mounter is inhibited; this is what wakes
+		   it (13.9.2: re-validate as if the medium were re-inserted).  A
+		   node whose handler has not started yet is started by DOS to
+		   receive the packet, and answers success as it was never
+		   inhibited.  Either way the Lock() then finds a live volume. */
+		if (!Inhibit((CONST_STRPTR)am->names[i], DOSFALSE))
+			Debug_Warn("could not uninhibit %s (IoErr %ld)\n", am->names[i],
+					(LONG)IoErr());
+
+		lock = Lock((CONST_STRPTR)am->names[i], SHARED_LOCK);
 
 		if (lock != 0)
 		{
