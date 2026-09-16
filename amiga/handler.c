@@ -72,6 +72,7 @@ static BOOL mount_fs(struct ExfatHandler* h);
 static void unmount_fs(struct ExfatHandler* h);
 static void add_volume(struct ExfatHandler* h);
 static void remove_volume(struct ExfatHandler* h);
+static BOOL volume_listed(struct ExfatHandler* h);
 static void spec_from_envec(struct ExfatHandler* h);
 static BOOL resolve_extent(struct ExfatHandler* h, BOOL publish);
 static void activate_partitions(struct ExfatHandler* h);
@@ -1481,8 +1482,20 @@ static void do_inhibit(struct ExfatHandler* h, struct DosPacket* pkt)
 				if (!flushed)
 					discard_dirty_state(h);
 			}
+			/* Detach the volume, the way SFS and fat95 do when their
+			   medium goes: no task, the locks stay chained on the node.
+			   That is what Workbench looks for on DISKREMOVED - it closes
+			   the volume's windows and gives the locks back, which is
+			   what lets release_if_idle() finish the job.  Left attached,
+			   Workbench keeps window and icon and the lock for ever. */
+			if (h->volume != NULL)
+			{
+				Forbid();
+				h->volume->dl_Task = NULL;
+				Permit();
+			}
 			Debug_Info("inhibited (parked: %lu locks, %lu files still open, "
-					"so the volume stays mounted; %s)\n",
+					"so the volume stays mounted, detached; %s)\n",
 					(ULONG)h->nlocks, (ULONG)h->nfiles,
 					flushed ? "flushed and marked clean"
 					        : "medium gone before it could be flushed");
@@ -1526,6 +1539,22 @@ static void do_inhibit(struct ExfatHandler* h, struct DosPacket* pkt)
 			err = set_volume_dirty(h, TRUE);
 		if (err == 0)
 		{
+			/* Re-attach the volume.  If the mounter unlisted it while it
+			   was detached, list it again so Workbench shows it. */
+			if (h->volume != NULL)
+			{
+				BOOL listed = TRUE;
+
+				if (AttemptLockDosList(LDF_VOLUMES | LDF_WRITE) != 0)
+				{
+					listed = volume_listed(h);
+					UnLockDosList(LDF_VOLUMES | LDF_WRITE);
+				}
+				h->volume->dl_Task = h->port;
+				if (!listed && AddDosEntry((struct DosList*)h->volume) == DOSFALSE)
+					Debug_Warn("could not re-list the volume (IoErr %ld)\n",
+							(LONG)IoErr());
+			}
 			h->inhibited = FALSE;
 			Debug_Info("uninhibited\n");
 		}
@@ -2356,6 +2385,22 @@ static void unmount_fs(struct ExfatHandler* h)
 	Debug_Info("volume unmounted\n");
 }
 
+/* Is our volume node in the DOS list?  Caller holds the list.  The mounter
+   unlists a detached volume whose only locks are ours once DISKREMOVED has
+   been delivered (sagasd.device 2.38), so it may well be gone by the time
+   the last lock comes back. */
+static BOOL volume_listed(struct ExfatHandler* h)
+{
+	EXFAT_BASES(h);
+	struct DosList* dl = (struct DosList*)BADDR(
+			((struct DosInfo*)BADDR(DOSBase->dl_Root->rn_Info))->di_DevInfo);
+
+	for (; dl != NULL; dl = (struct DosList*)BADDR(dl->dol_Next))
+		if (dl == (struct DosList*)h->volume)
+			return TRUE;
+	return FALSE;
+}
+
 static void remove_volume(struct ExfatHandler* h)
 {
 	EXFAT_BASES(h);
@@ -2367,7 +2412,10 @@ static void remove_volume(struct ExfatHandler* h)
 		   put that one back before letting it go (see do_rename_disk). */
 		if (h->volname_orig != 0)
 			h->volume->dl_Name = h->volname_orig;
-		RemDosEntry((struct DosList*)h->volume);
+		if (volume_listed(h))
+			RemDosEntry((struct DosList*)h->volume);
+		else
+			Debug_Info("volume node was already unlisted\n");
 		UnLockDosList(LDF_VOLUMES | LDF_WRITE);
 		FreeDosEntry((struct DosList*)h->volume);
 	}

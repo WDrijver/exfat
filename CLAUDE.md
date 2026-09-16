@@ -976,8 +976,17 @@ simulating a medium change".  So inhibit is complete, not partial, since 1.6:
   single- and multi-partition cards.  Sibling names stay `SDROM1`, `SDROM2`
   (parent name with the trailing digit replaced, walking forward past taken
   names); decided to keep that convention.
-- **Something open: parked.**  Flushed, marked clean, mount kept so the
-  locks stay valid.  Uninhibit re-reads the boot sector and compares serial,
+- **Something open: parked - and detached (1.9).**  Flushed as far as the
+  medium allows, the rest discarded, mount kept so the locks stay valid, and
+  the volume node's `dl_Task` cleared with the locks left chained on it -
+  exactly what SFS (`deinitdisk()`) and fat95 (`cd_sleep`) do.  Workbench
+  reacts to that plus `DISKREMOVED` by closing the volume's windows and
+  returning its locks, which is what lets `release_if_idle()` finish.  Left
+  attached (1.8), Workbench kept window, icon and lock for ever, and every
+  later uninhibit for another card was refused with 202.  Resume re-attaches
+  (`dl_Task = port`) and re-lists the node if the mounter's sweep unlisted
+  it; `remove_volume()` only `RemDosEntry()`s a node that is still listed
+  (`volume_listed()`).  Uninhibit re-reads the boot sector and compares serial,
   sector/cluster bits, cluster count and root cluster with the mounted
   superblock: the same volume resumes, a different one is refused with
   `ERROR_OBJECT_IN_USE` and the handler stays inhibited - the locks describe
