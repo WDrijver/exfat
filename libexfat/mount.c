@@ -113,13 +113,22 @@ static void parse_options(struct exfat* ef, const char* options)
 	}
 }
 
-static bool verify_vbr_checksum(const struct exfat* ef, void* sector)
+/* `buffer' is the zero-cluster scratch, at least one cluster.  The twelve
+   VBR sectors are contiguous, so they are read in one request when the
+   scratch holds them (any cluster of 8 sectors or more); a single device
+   round trip instead of twelve, which on AmigaOS is a message to the driver
+   task and back per request.  The fallback keeps the sector-by-sector loop
+   for a volume whose cluster is smaller than the VBR. */
+static bool verify_vbr_checksum(const struct exfat* ef, void* buffer)
 {
 	exfat_off_t sector_size = SECTOR_SIZE(*ef->sb);
 	uint32_t vbr_checksum;
 	size_t i;
+	char* sector = buffer;
+	bool whole = (CLUSTER_SIZE(*ef->sb) >= 12 * sector_size);
 
-	if (exfat_pread(ef->dev, sector, sector_size, 0) < 0)
+	if (exfat_pread(ef->dev, buffer, whole ? 12 * sector_size : sector_size,
+				0) < 0)
 	{
 		exfat_error("failed to read boot sector");
 		return false;
@@ -127,7 +136,10 @@ static bool verify_vbr_checksum(const struct exfat* ef, void* sector)
 	vbr_checksum = exfat_vbr_start_checksum(sector, sector_size);
 	for (i = 1; i < 11; i++)
 	{
-		if (exfat_pread(ef->dev, sector, sector_size, i * sector_size) < 0)
+		if (whole)
+			sector += sector_size;
+		else if (exfat_pread(ef->dev, buffer, sector_size,
+					i * sector_size) < 0)
 		{
 			exfat_error("failed to read VBR sector");
 			return false;
@@ -135,7 +147,9 @@ static bool verify_vbr_checksum(const struct exfat* ef, void* sector)
 		vbr_checksum = exfat_vbr_add_checksum(sector, sector_size,
 				vbr_checksum);
 	}
-	if (exfat_pread(ef->dev, sector, sector_size, i * sector_size) < 0)
+	if (whole)
+		sector += sector_size;
+	else if (exfat_pread(ef->dev, buffer, sector_size, i * sector_size) < 0)
 	{
 		exfat_error("failed to read VBR checksum sector");
 		return false;

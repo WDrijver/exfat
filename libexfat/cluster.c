@@ -444,13 +444,27 @@ int exfat_truncate(struct exfat* ef, struct exfat_node* node, uint64_t size,
 
 uint32_t exfat_count_free_clusters(const struct exfat* ef)
 {
-	uint32_t free_clusters = 0;
+	/* Called for every ACTION_INFO on AmigaOS - Workbench asks on each
+	   window refresh - and at unmount.  Bit by bit it was one loop
+	   iteration per cluster, a million of them on a 32 GB card.  The
+	   bitmap's byte layout is the on-disk one on both byte orders (bit i is
+	   byte i/8, bit i%8 - that is what the bitmap_t choice in byteorder.h
+	   guarantees), so whole bytes are counted through a nibble table and
+	   only the bits of a trailing partial byte one at a time; bits past
+	   cmap.size in that byte are not ours to count. */
+	static const uint8_t nibble_bits[16] =
+		{ 0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4 };
+	const uint8_t* bytes = (const uint8_t*) ef->cmap.chunk;
+	uint32_t whole = ef->cmap.size / 8;
+	uint32_t used = 0;
 	uint32_t i;
 
-	for (i = 0; i < ef->cmap.size; i++)
-		if (BMAP_GET(ef->cmap.chunk, i) == 0)
-			free_clusters++;
-	return free_clusters;
+	for (i = 0; i < whole; i++)
+		used += nibble_bits[bytes[i] & 0xf] + nibble_bits[bytes[i] >> 4];
+	for (i = whole * 8; i < ef->cmap.size; i++)
+		if (BMAP_GET(ef->cmap.chunk, i))
+			used++;
+	return ef->cmap.size - used;
 }
 
 static int find_used_clusters(const struct exfat* ef,

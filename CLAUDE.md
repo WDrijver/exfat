@@ -998,6 +998,21 @@ simulating a medium change".  So inhibit is complete, not partial, since 1.6:
 - A resumed park trusts the volume not to have been modified elsewhere in
   between, like every classic file system does.
 
+## Performance (1.11)
+
+`research/performance-2026-09-16.md` costs every path in device round
+trips and says what is left.  Done and host-proven in 1.11: the free-cluster
+count is byte-wise (it ran bit by bit on every `ACTION_INFO` - every
+Workbench window refresh - and at unmount; a million iterations on a 32 GB
+card), the VBR checksum reads its twelve sectors in one request, and the
+64-bit divide takes a shift for the power-of-two divisors libexfat always
+uses.  A mount is ~25 round trips and one bulk read; if it feels slow the
+time is sagasd's 2 s poll and 5 s boot delay, not the handler.  Directory
+reads are one round trip per 16 entries through `dev_io.c`'s bounce block
+and cached in memory afterwards; `ExNext` is O(1).  Proposed, not done:
+open the device once at startup, a second bounce block for the FAT,
+chunked bouncing for odd-address buffers.
+
 ## Size: what the DEBUG=0 handler pays for (1.10)
 
 59,128 -> 47,644 bytes, no functional change, measured per lever:

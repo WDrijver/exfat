@@ -427,6 +427,60 @@ static void sc_fill(void)
 	free(buf);
 }
 
+/* The free-cluster count is byte-wise since 1.11; this checks it against
+   the original bit-by-bit loop on the live bitmap, then again with the
+   trailing partial byte deliberately dirtied - bits past cmap.size must
+   not count - and after allocating a few clusters. */
+static uint32_t count_free_reference(void)
+{
+	uint32_t n = 0, i;
+
+	for (i = 0; i < ef.cmap.size; i++)
+		if (BMAP_GET(ef.cmap.chunk, i) == 0)
+			n++;
+	return n;
+}
+
+static void sc_freecount(void)
+{
+	uint32_t before, after;
+	size_t chunk = CLUSTER_SIZE(*ef.sb);
+	unsigned char* buf = malloc(chunk * 3);
+	struct exfat_node* node;
+	unsigned char* bytes = (unsigned char*) ef.cmap.chunk;
+	uint32_t tail = ef.cmap.size % 8;
+
+	CHECK(exfat_count_free_clusters(&ef) == count_free_reference(),
+			"byte-wise count matches the bit loop (%u vs %u)",
+			exfat_count_free_clusters(&ef), count_free_reference());
+
+	if (tail != 0)
+	{
+		/* set the bits beyond the last cluster; neither count may move */
+		unsigned char saved = bytes[ef.cmap.size / 8];
+		bytes[ef.cmap.size / 8] |= (unsigned char) (0xff << tail);
+		CHECK(exfat_count_free_clusters(&ef) == count_free_reference(),
+				"bits past cmap.size are ignored");
+		bytes[ef.cmap.size / 8] = saved;
+	}
+	else
+		printf("  (cluster count is a multiple of 8, no partial byte)\n");
+
+	if (buf == NULL)
+		return;
+	fill_pattern(buf, chunk * 3, 5);
+	before = exfat_count_free_clusters(&ef);
+	CHECK(exfat_mknod(&ef, "/freecount.bin") == 0, "create");
+	CHECK(exfat_lookup(&ef, &node, "/freecount.bin") == 0, "lookup");
+	CHECK(write_at(node, buf, chunk * 3, 0) == 0, "write three clusters");
+	close_file(node);
+	after = exfat_count_free_clusters(&ef);
+	CHECK(before - after == 3, "three clusters fewer free (%u -> %u)",
+			before, after);
+	CHECK(after == count_free_reference(), "still matches the bit loop");
+	free(buf);
+}
+
 /* ------------------------------------------------------------------ */
 
 static const struct
@@ -436,6 +490,7 @@ static const struct
 }
 scenarios[] =
 {
+	{ "freecount", sc_freecount },
 	{ "small",    sc_small },
 	{ "spanning", sc_spanning },
 	{ "grow",     sc_grow },

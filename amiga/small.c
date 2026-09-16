@@ -17,11 +17,14 @@
    it once - to parse "ro_fallback,noatime" at mount time. */
 
 #include <stddef.h>
+#include <stdint.h>
 
 typedef unsigned long long u64;
 typedef long long s64;
 
-static u64 udivmod64(u64 n, u64 d, u64* rem)
+/* Kept out of line so the divide itself can be unit-tested on the build
+   host (hosttest/unittest.c includes this file). */
+u64 exfat_small_udivmod64(u64 n, u64 d, u64* rem)
 {
 	u64 q = 0, r = 0;
 	int i;
@@ -37,9 +40,22 @@ static u64 udivmod64(u64 n, u64 d, u64* rem)
 			*rem = 0;
 		return 0;
 	}
+	if ((d & (d - 1)) == 0)
+	{
+		/* A power of two - which is every divisor libexfat ever uses:
+		   sector size, cluster size, entries per sector.  A shift and a
+		   mask, whatever the size of the dividend. */
+		int shift = 0;
+
+		while ((d >> shift) != 1)
+			shift++;
+		if (rem != NULL)
+			*rem = n & (d - 1);
+		return n >> shift;
+	}
 	if ((n >> 32) == 0 && (d >> 32) == 0)
 	{
-		unsigned long a = (unsigned long)n, b = (unsigned long)d;
+		uint32_t a = (uint32_t)n, b = (uint32_t)d;
 
 		if (rem != NULL)
 			*rem = a % b;
@@ -61,14 +77,14 @@ static u64 udivmod64(u64 n, u64 d, u64* rem)
 
 u64 __udivdi3(u64 n, u64 d)
 {
-	return udivmod64(n, d, NULL);
+	return exfat_small_udivmod64(n, d, NULL);
 }
 
 u64 __umoddi3(u64 n, u64 d)
 {
 	u64 r;
 
-	udivmod64(n, d, &r);
+	exfat_small_udivmod64(n, d, &r);
 	return r;
 }
 
@@ -79,7 +95,7 @@ s64 __divdi3(s64 n, s64 d)
 
 	if (n < 0) { n = -n; neg ^= 1; }
 	if (d < 0) { d = -d; neg ^= 1; }
-	q = udivmod64((u64)n, (u64)d, NULL);
+	q = exfat_small_udivmod64((u64)n, (u64)d, NULL);
 	return neg ? -(s64)q : (s64)q;
 }
 

@@ -38,7 +38,7 @@ fi
 if [ $# -gt 0 ]; then
 	SCENARIOS="$*"
 else
-	SCENARIOS="small spanning grow shrink dirs rename delete names fragment fill"
+	SCENARIOS="small spanning grow shrink dirs rename delete names fragment fill freecount"
 fi
 
 echo

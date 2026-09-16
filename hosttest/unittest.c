@@ -235,12 +235,80 @@ static void test_printf(void)
 	ok(n == 10, "returns the length it would have written", NULL, NULL);
 }
 
+/* ------------------------------------------------------------------ */
+/* The 64-bit divide the handler links instead of libgcc's              */
+/* ------------------------------------------------------------------ */
+
+/* small.c also defines __udivdi3 & co and strstr, which clash with the
+   host's libgcc and libc; rename them for the include.  The one under
+   test, exfat_small_udivmod64(), keeps its name. */
+#define __udivdi3 small_udivdi3
+#define __umoddi3 small_umoddi3
+#define __divdi3  small_divdi3
+#define strstr    small_strstr
+#include "../amiga/small.c"
+#undef strstr
+
+static void check_div(unsigned long long n, unsigned long long d)
+{
+	unsigned long long r, q = exfat_small_udivmod64(n, d, &r);
+	char got[80], want[80];
+
+	snprintf(got, sizeof(got), "%llu / %llu = %llu rem %llu", n, d, q, r);
+	snprintf(want, sizeof(want), "%llu / %llu = %llu rem %llu", n, d,
+			d ? n / d : 0ULL, d ? n % d : 0ULL);
+	ok(d ? (q == n / d && r == n % d) : (q == 0 && r == 0),
+			"udivmod64", got, want);
+}
+
+static void test_divide(void)
+{
+	unsigned long long n, d;
+	unsigned i;
+
+	printf("64-bit divide\n");
+	/* the divisors libexfat uses: every power of two a sector or cluster
+	   can be, against dividends on both sides of 4 GB */
+	for (d = 1; d != 0; d <<= 1)
+	{
+		check_div(0, d);
+		check_div(d - 1, d);
+		check_div(d, d);
+		check_div(0xFFFFFFFFULL, d);
+		check_div(0x100000000ULL, d);
+		check_div(0x123456789ABCDEFULL, d);
+		check_div(~0ULL, d);
+	}
+	/* general case: 32-bit fast path and the wide loop */
+	n = 0x9E3779B97F4A7C15ULL;
+	for (i = 0; i < 2000; i++)
+	{
+		n = n * 6364136223846793005ULL + 1442695040888963407ULL;
+		d = (n >> 17) ^ (n << 3);
+		if ((i & 3) == 0) d &= 0xFFFFFFFFULL;
+		if ((i & 7) == 0) n &= 0xFFFFFFFFULL;
+		if (d == 0) d = 3;
+		check_div(n, d);
+	}
+	check_div(12345, 0);
+	ok(small_divdi3(-1000000000000LL, 7) == -1000000000000LL / 7 &&
+			small_divdi3(1000000000000LL, -7) == 1000000000000LL / -7 &&
+			small_divdi3(-1000000000000LL, -7) == -1000000000000LL / -7,
+			"signed divide", NULL, NULL);
+	ok(small_strstr("ro_fallback,noatime", "noatime") != NULL &&
+			small_strstr("ro_fallback,noatime", "ro") != NULL &&
+			small_strstr("ro_fallback,noatime", "repair") == NULL &&
+			small_strstr("abc", "") != NULL,
+			"strstr", NULL, NULL);
+}
+
 int main(void)
 {
 	printf("== host unit tests ==\n\n");
 	test_datestamp();
 	test_charset();
 	test_printf();
+	test_divide();
 	printf("\n%d checks, %d failures\n", checks, failures);
 	return failures == 0 ? 0 : 1;
 }
