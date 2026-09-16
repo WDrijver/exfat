@@ -1348,6 +1348,74 @@ static LONG set_volume_dirty(struct ExfatHandler* h, BOOL dirty)
 	return 0;
 }
 
+/* Is the medium in the slot the volume this mount describes?  Re-reads
+   the boot sector and compares what identifies a volume: serial, sector
+   and cluster bits, cluster count, root cluster.  FALSE also when there is
+   no medium to read. */
+static BOOL same_volume(struct ExfatHandler* h)
+{
+	EXFAT_BASES(h);
+	struct exfat_super_block sb;
+	const struct exfat_super_block* old = h->ef.sb;
+
+	if (!h->mounted || old == NULL)
+		return FALSE;
+	if (exfat_pread(h->ef.dev, &sb, sizeof(sb), 0) != (ssize_t)sizeof(sb))
+		return FALSE;
+	return memcmp(sb.oem_name, "EXFAT   ", 8) == 0 &&
+			le32_to_cpu(sb.volume_serial) == le32_to_cpu(old->volume_serial) &&
+			sb.sector_bits == old->sector_bits &&
+			sb.spc_bits == old->spc_bits &&
+			le32_to_cpu(sb.cluster_count) == le32_to_cpu(old->cluster_count) &&
+			le32_to_cpu(sb.rootdir_cluster) == le32_to_cpu(old->rootdir_cluster);
+}
+
+static void discard_dirty_nodes(struct exfat_node* n)
+{
+	struct exfat_node* c;
+
+	n->is_dirty = false;
+	for (c = n->child; c != NULL; c = c->next)
+		discard_dirty_nodes(c);
+}
+
+/* Forget every change that has not reached the medium.  Used when the
+   medium these changes belong to is gone: libexfat would otherwise write
+   them on the next put_node(), flush() or unmount() - onto whatever card is
+   in the slot by then - and exfat_reset_cache() refuses (exfat_bug) to drop
+   a dirty node.  The volume keeps its VolumeDirty flag on disk, so the next
+   host checks it; that is the honest outcome of pulling a card mid-write. */
+static void discard_dirty_state(struct ExfatHandler* h)
+{
+	EXFAT_BASES(h);
+	if (!h->mounted)
+		return;
+	discard_dirty_nodes(h->ef.root);
+	h->ef.cmap.dirty = false;
+	Debug_Warn("unwritten metadata discarded: the medium it belongs to is "
+			"not in the slot\n");
+}
+
+/* Let go of a mount whose medium may no longer be the one in the slot.
+   Same volume: a normal unmount, which writes the final superblock.  Any
+   other medium, or none: nothing may be written, so the mount is switched
+   read-only for the unmount (finalize_super_block() and the flushes honour
+   ef.ro) after the dirty state has been discarded. */
+static void release_mount(struct ExfatHandler* h)
+{
+	EXFAT_BASES(h);
+	if (!h->mounted)
+		return;
+	if (same_volume(h))
+	{
+		unmount_fs(h);
+		return;
+	}
+	discard_dirty_state(h);
+	h->ef.ro = true;
+	unmount_fs(h);
+}
+
 /* ACTION_INHIBIT (31).  Section 13.9.2: an inhibited file system stops
    touching the medium and reports 'BUSY'; once uninhibited it "shall
    perform a validation of the medium as if the medium has been re-inserted"
@@ -1356,30 +1424,37 @@ static LONG set_volume_dirty(struct ExfatHandler* h, BOOL dirty)
    it when one comes back.  This handler has no change interrupt of its own,
    so that pair is the only way it ever learns about a swap.
 
-   Inhibit:
+   Inhibit ALWAYS succeeds.  It is sent after the card has already gone, so
+   a flush that fails then is not a reason to refuse - 1.6 did refuse
+   (ERROR_DISK_FULL), which left the handler live on a stale mount, and the
+   next card was then served through the old card's metadata.  What cannot
+   be written is discarded; the volume stays flagged dirty on disk.
+
    - nothing holds the volume: let go of it completely (volume node gone,
      medium closed).  Uninhibit then mounts from scratch, which is the full
      re-validation the section asks for, and it is what ACTION_FORMAT needs.
    - locks or files are still open: a full unmount would leave them pointing
-     at freed nodes, so the mount is parked in memory: flushed and marked
-     clean, and from here on nothing reads or writes the medium (the packet
-     loop refuses every medium-touching packet while inhibited, and
-     ACTION_END does not flush).  The moment the last lock or file goes,
-     release_if_idle() completes the release, so the next uninhibit is a
-     clean mount after all.
+     at freed nodes, so the mount is parked in memory: flushed as far as the
+     medium allows, the rest discarded, and from here on nothing reads or
+     writes the medium (the packet loop refuses every medium-touching packet
+     while inhibited, and ACTION_END does not flush).  The moment the last
+     lock or file goes, release_if_idle() completes the release - through
+     release_mount(), which writes nothing unless the medium is provably the
+     same volume - so the next uninhibit is a clean mount after all.
 
    Uninhibit:
    - released: re-derive the extent from the DosEnvec (resolve_extent()
-     narrows it in place, so it cannot be reused), find the volume again and
-     mount it.  Failure leaves the handler inhibited and answers
-     ERROR_NOT_A_DOS_DISK - the card in the slot is not one for us.
-   - parked: the medium is re-read and compared with what was mounted
-     (serial, geometry, root).  The same volume resumes; a different one is
-     refused with ERROR_OBJECT_IN_USE and the handler stays inhibited,
-     because the open locks describe the old volume and serving the new one
-     through them would corrupt it.  That handler wakes once its locks are
-     gone.  Like every classic file system, a resumed park trusts the
-     volume not to have been modified elsewhere in the meantime. */
+     narrows it in place, so it cannot be reused), find the volume again,
+     mount it and wake the sibling partitions.  Failure leaves the handler
+     inhibited and answers ERROR_NOT_A_DOS_DISK - the card in the slot is not
+     one for us.
+   - parked: the medium is compared with what was mounted (same_volume()).
+     The same volume resumes; a different one is refused with
+     ERROR_OBJECT_IN_USE and the handler stays inhibited, because the open
+     locks describe the old volume and serving the new one through them
+     would corrupt it.  That handler wakes once its locks are gone.  Like
+     every classic file system, a resumed park trusts the volume not to have
+     been modified elsewhere in the meantime. */
 static void do_inhibit(struct ExfatHandler* h, struct DosPacket* pkt)
 {
 	EXFAT_BASES(h);
@@ -1391,29 +1466,28 @@ static void do_inhibit(struct ExfatHandler* h, struct DosPacket* pkt)
 		if (h->nlocks == 0 && h->nfiles == 0)
 		{
 			remove_volume(h);
-			unmount_fs(h);
+			release_mount(h);
 		}
 		else
 		{
+			BOOL flushed = TRUE;
+
 			if (!h->ef.ro)
 			{
-				if (exfat_flush_nodes(&h->ef) != 0 ||
-						exfat_flush(&h->ef) != 0)
-					err = ERROR_DISK_FULL;
-				if (err == 0)
-					err = set_volume_dirty(h, FALSE);
+				if (exfat_flush_nodes(&h->ef) != 0 || exfat_flush(&h->ef) != 0)
+					flushed = FALSE;
+				if (flushed && set_volume_dirty(h, FALSE) != 0)
+					flushed = FALSE;
+				if (!flushed)
+					discard_dirty_state(h);
 			}
-			if (err == 0)
-				Debug_Info("inhibited (parked: %lu locks, %lu files still "
-						"open, so the volume stays mounted)\n",
-						(ULONG)h->nlocks, (ULONG)h->nfiles);
+			Debug_Info("inhibited (parked: %lu locks, %lu files still open, "
+					"so the volume stays mounted; %s)\n",
+					(ULONG)h->nlocks, (ULONG)h->nfiles,
+					flushed ? "flushed and marked clean"
+					        : "medium gone before it could be flushed");
 		}
-		if (err == 0)
-		{
-			h->inhibited = TRUE;
-			Debug_Info("inhibited: flushed and marked clean, safe to remove "
-					"the medium\n");
-		}
+		h->inhibited = TRUE;
 	}
 	else if (!on && h->inhibited)
 	{
@@ -1437,32 +1511,19 @@ static void do_inhibit(struct ExfatHandler* h, struct DosPacket* pkt)
 			activate_partitions(h);
 			return;
 		}
-		else
+		if (!same_volume(h))
 		{
-			struct exfat_super_block sb;
-			const struct exfat_super_block* old = h->ef.sb;
-
-			if (exfat_pread(h->ef.dev, &sb, sizeof(sb), 0) !=
-						(ssize_t)sizeof(sb) ||
-					memcmp(sb.oem_name, "EXFAT   ", 8) != 0 ||
-					le32_to_cpu(sb.volume_serial) != le32_to_cpu(old->volume_serial) ||
-					sb.sector_bits != old->sector_bits ||
-					sb.spc_bits != old->spc_bits ||
-					le32_to_cpu(sb.cluster_count) != le32_to_cpu(old->cluster_count) ||
-					le32_to_cpu(sb.rootdir_cluster) != le32_to_cpu(old->rootdir_cluster))
-			{
-				Debug_Error("uninhibit: the medium is not the volume that "
-						"%lu locks and %lu files are open on - staying "
-						"inhibited until they are closed\n",
-						(ULONG)h->nlocks, (ULONG)h->nfiles);
-				ReplyPkt(pkt, DOSFALSE, ERROR_OBJECT_IN_USE);
-				return;
-			}
-			Debug_Info("uninhibit: same volume is back, resuming the parked "
-					"mount\n");
-			err = set_volume_dirty(h, TRUE);
+			Debug_Error("uninhibit: the medium is not the volume that %lu "
+					"locks and %lu files are open on - staying inhibited "
+					"until they are closed\n",
+					(ULONG)h->nlocks, (ULONG)h->nfiles);
+			ReplyPkt(pkt, DOSFALSE, ERROR_OBJECT_IN_USE);
+			return;
 		}
-
+		Debug_Info("uninhibit: same volume is back, resuming the parked "
+				"mount\n");
+		if (!h->ef.ro)
+			err = set_volume_dirty(h, TRUE);
 		if (err == 0)
 		{
 			h->inhibited = FALSE;
@@ -1473,7 +1534,8 @@ static void do_inhibit(struct ExfatHandler* h, struct DosPacket* pkt)
 }
 
 /* A parked, inhibited mount whose last lock or file has just gone can now
-   be released for real, so the next uninhibit is a clean re-mount. */
+   be released for real, so the next uninhibit is a clean re-mount.  Through
+   release_mount(): the slot may hold another card by now, or none. */
 static void release_if_idle(struct ExfatHandler* h)
 {
 	EXFAT_BASES(h);
@@ -1481,7 +1543,7 @@ static void release_if_idle(struct ExfatHandler* h)
 	{
 		Debug_Info("inhibited and no longer in use: releasing the volume\n");
 		remove_volume(h);
-		unmount_fs(h);
+		release_mount(h);
 	}
 }
 
