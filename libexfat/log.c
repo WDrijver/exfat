@@ -20,6 +20,7 @@
 	51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 */
 
+#define EXFAT_LOG_C 1	/* keep the real definitions below, see exfat.h */
 #include "exfat.h"
 #include <stdarg.h>
 

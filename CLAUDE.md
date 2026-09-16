@@ -998,6 +998,33 @@ simulating a medium change".  So inhibit is complete, not partial, since 1.6:
 - A resumed park trusts the volume not to have been modified elsewhere in
   between, like every classic file system does.
 
+## Size: what the DEBUG=0 handler pays for (1.10)
+
+59,128 -> 47,644 bytes, no functional change, measured per lever:
+
+- **libexfat's `exfat_error/warn/debug()` calls, -5.4 KB.**  At DEBUG=0 the
+  functions render nothing, but ~150 call sites still kept their format
+  strings and built their arguments.  `exfat.h` now expands them to a dead
+  `if (0)` call on AmigaOS when DEBUG is off - dead so the arguments stay
+  "used" (mkfs has a variable that only feeds a message), and the compiler
+  drops call, arguments and string.  `log.c` defines `EXFAT_LOG_C` to keep
+  the real functions; `exfat_bug()` is never a macro, its halt is not
+  optional.
+- **libgcc's 64-bit divide, -4.6 KB.**  `__udivdi3/__umoddi3/__divdi3` plus
+  `__clz` are the generic 68000 versions.  `amiga/small.c` replaces them:
+  a `divu.l` fast path for operands under 4 GB, shift-subtract behind it.
+  Division is per file-system operation, never per byte.  Divide by zero
+  answers 0 instead of trapping - no caller can pass it, and a trap from a
+  file system process takes the machine down.
+- **libc's `strstr`, -1.6 KB.**  The two-way algorithm, called once at
+  mount to parse the option string.  A plain loop in `small.c`.
+- `--gc-sections` makes the hunk binary *larger*; `-msmall-code` cannot
+  reach across 56 KB of text.  Neither applies.
+- What is left and why: the mkfs engine behind `ACTION_FORMAT` is 10.7 KB
+  (18%), 5.8 KB of it the compressed upcase table.  Kept on purpose - the
+  only remaining lever that removes a feature.  If ROM space ever forces
+  it, a `FORMAT=0` switch defaulting to on is the shape.
+
 ## Write-phase choices (provisional, revisit before general use)
 
 - **Flush policy: directory entries eagerly, the bitmap at sync points.**

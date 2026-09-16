@@ -24,7 +24,7 @@ export LC_ALL := C
 # the serial log and the rt_Version byte in the ROM say which build is
 # actually running.  1.0 is the first build in which ROM registration is
 # expected to work (coldstart priority above sagasd.device).
-VERSION ?= 1.9
+VERSION ?= 1.10
 
 BUILD_DATE := $(shell date +"%d.%m.%Y-%H.%M.%S")
 
@@ -75,6 +75,13 @@ CFLAGS += -DEXFAT_VER=$(VER_MAJOR) -DEXFAT_REV=$(if $(VER_MINOR),$(VER_MINOR),0)
 #   none      42244     DEBUG=8  FLAG          42252
 #   DEBUG=4   errors    45528    DEBUG=12 FLAG+ERROR  ~46000
 #   DEBUG=6   +warn     49028    DEBUG=7  everything   51616
+# Re-measured 2026-09-16 at 1.10, after libexfat's log calls were compiled
+# out at DEBUG=0 (exfat.h) and libgcc's 64-bit divide and libc's strstr
+# were replaced (small.c):
+#   none      47644 (was 59128 at 1.9)      DEBUG=7  everything   65108
+# The remaining big item is the mkfs engine behind ACTION_FORMAT, 10.7 KB
+# (uctc.c's compressed upcase table alone is 5.8 KB).  Deliberately kept:
+# it is the only lever left that costs a feature.
 #
 # FLAG is the ROM tag's own channel: exfat_rom_init's stage markers and
 # nothing else, so it is nearly free.  For diagnosing ROM registration use
@@ -115,7 +122,10 @@ LDFLAGS = -lc $(LIBGCC) -lc
 # of the write path.  Leaving it out is what an over-eager removal of that
 # switch does first: everything compiles and the link fails on
 # exfat_amiga_format.
-AMIGA_SRCS   = handler.c dev_io.c amigaos.c parttable.c romtag.c format.c
+# small.c replaces libgcc's 64-bit divide and libc's strstr with lighter
+# versions; it must be linked before -lc and libgcc, which the OBJ order
+# below guarantees.
+AMIGA_SRCS   = handler.c dev_io.c amigaos.c parttable.c romtag.c format.c small.c
 LIBEXFAT_SRCS = cluster.c io.c log.c lookup.c mount.c node.c repair.c time.c \
                 utf.c utils.c
 # the mkfs engine, minus its command line front end (main.c)

@@ -146,6 +146,22 @@ void exfat_error(const char* format, ...) PRINTF;
 void exfat_warn(const char* format, ...) PRINTF;
 void exfat_debug(const char* format, ...) PRINTF;
 
+/* AmigaOS, DEBUG off: the three reporting calls render nothing (log.c
+   routes them to the ApolloCrossDev debug macros, which are empty then),
+   yet every one of the ~150 call sites still kept its format string and
+   built its arguments - 5.4 KB of a 59 KB handler.  Expand them to nothing
+   instead.  log.c defines EXFAT_LOG_C so its own definitions are left
+   alone, and exfat_bug() stays a real call: its halt is not optional. */
+#if (defined(__amigaos__) || defined(AMIGA)) && !defined(EXFAT_LOG_C) && \
+	(!defined(DEBUG) || DEBUG == 0)
+/* The dead call keeps the arguments "used" - without it mkfs's erase_object()
+   warns about a variable that only ever fed a message - and the compiler
+   drops the call, the argument code and the string alike. */
+#define exfat_error(...) do { if (0) (exfat_error)(__VA_ARGS__); } while (0)
+#define exfat_warn(...)  do { if (0) (exfat_warn)(__VA_ARGS__); } while (0)
+#define exfat_debug(...) do { if (0) (exfat_debug)(__VA_ARGS__); } while (0)
+#endif
+
 struct exfat_dev* exfat_open(const char* spec, enum exfat_mode mode);
 int exfat_close(struct exfat_dev* dev);
 int exfat_fsync(struct exfat_dev* dev);
