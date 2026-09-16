@@ -971,7 +971,11 @@ simulating a medium change".  So inhibit is complete, not partial, since 1.6:
   card, parked by the mounter) and woken, or published if there is none;
   the activation process then sends every name `Inhibit(FALSE)` and a
   `Lock()`, after the uninhibit packet has been replied.  A single-partition
-  card followed by a three-partition one mounts all three.
+  card followed by a three-partition one mounts all three - verified on the
+  V4 with sagasd.device 2.38 on 2026-09-16, including repeated swaps between
+  single- and multi-partition cards.  Sibling names stay `SDROM1`, `SDROM2`
+  (parent name with the trailing digit replaced, walking forward past taken
+  names); decided to keep that convention.
 - **Something open: parked.**  Flushed, marked clean, mount kept so the
   locks stay valid.  Uninhibit re-reads the boot sector and compares serial,
   sector/cluster bits, cluster count and root cluster with the mounted
