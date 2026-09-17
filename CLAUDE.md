@@ -1006,7 +1006,7 @@ count is byte-wise (it ran bit by bit on every `ACTION_INFO` - every
 Workbench window refresh - and at unmount; a million iterations on a 32 GB
 card), the VBR checksum reads its twelve sectors in one request, and the
 64-bit divide takes a shift for the power-of-two divisors libexfat always
-uses.  A mount is ~25 round trips and one bulk read; if it feels slow the
+uses - verified on the V4 on 2026-09-17 (mount, read, eject cycles).  A mount is ~25 round trips and one bulk read; if it feels slow the
 time is sagasd's 2 s poll and 5 s boot delay, not the handler.  Directory
 reads are one round trip per 16 entries through `dev_io.c`'s bounce block
 and cached in memory afterwards; `ExNext` is O(1).  Proposed, not done:
