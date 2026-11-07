@@ -10,7 +10,7 @@
 	INFO, DISK_INFO, CURRENT_VOLUME, IS_FILESYSTEM, FLUSH, INHIBIT and DIE.
 	Everything else is answered with ERROR_ACTION_NOT_KNOWN.
 
-	Packet semantics follow docs/os/amigados/13-packet-documentation.md;
+	Packet semantics follow chapter 13 of the AmigaDOS Reference Manual (ApolloCrossDev Docs);
 	startup follows section 12.1.2 of the same manual.
 
 	Copyright (C) 2026  Willem Drijver

@@ -62,7 +62,7 @@
 
 /* AmigaOS / m68k (ApolloCrossDev GCC).  The 68k is big-endian and the
    toolchain ships no <endian.h>, so define the byte order directly and use
-   the GCC builtins for the swaps.  See docs/fs/exfat-on-disk-format.md. */
+   the GCC builtins for the swaps.  See ApolloCrossDev Docs/exFAT/exfat-on-disk-format.md. */
 #define EXFAT_LITTLE_ENDIAN 1234
 #define EXFAT_BIG_ENDIAN    4321
 #define EXFAT_BYTE_ORDER    EXFAT_BIG_ENDIAN

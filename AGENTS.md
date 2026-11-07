@@ -41,9 +41,11 @@ Fields marked `not set yet`: ask the developer before relying on them, and fill 
   The compiler's headers are `<prefix>/m68k-amigaos/ndk32-include/Include_H`
   (`ndk-include` in older installs), see
   `ApolloKnowledgeBase/toolchain/target-os-headers.md`.
-- **The AmigaDOS manual chapters and the exFAT specification** are in neither. They are
-  in `~/ApolloClaude/docs/` (the private ApolloClaude repository), and the
-  `~/ApolloClaude/docs/...` paths below point there.
+- **AmigaDOS Reference Manual** (Thomas Richter, 2024, for AmigaOS 3.2 /
+  dos.library V47) and the **exFAT specification** are in ApolloCrossDev's
+  `Docs` folder: `~/ApolloCrossDev/Docs/AmigaDOS-Reference-Manual.pdf`, written `<AmigaDOS>` below, and
+  `~/ApolloCrossDev/Docs/exFAT/`. The manual is a PDF: read it by PDF page
+  (the contents are on PDF pages 4–12; PDF page = printed page + 11).
 
 ## Repository-specific rules
 
@@ -74,10 +76,10 @@ but nothing may be specific to it.
 
 | Topic | Doc |
 |---|---|
-| exFAT on-disk format | `~/ApolloClaude/docs/fs/exfat-on-disk-format.md` (working reference), `~/ApolloClaude/docs/fs/exfat-specification-upstream.md` (authoritative, Microsoft rev 1.00) |
-| DOS packets — what each `ACTION_*` receives and must return | `~/ApolloClaude/docs/os/amigados/13-packet-documentation.md`, indexed in `~/ApolloClaude/docs/os/amigados/README.md` |
-| Handler startup, main loop, shutdown | `~/ApolloClaude/docs/os/amigados/12-handlers-devices-and-file-systems.md` §12.1 |
-| Mount, device list, `DosEnvec` keywords | `~/ApolloClaude/docs/os/amigados/07-administration-of-volumes-devices-and.md` |
+| exFAT on-disk format | `~/ApolloCrossDev/Docs/exFAT/exfat-on-disk-format.md` (working reference), `~/ApolloCrossDev/Docs/exFAT/exfat-specification.md` (authoritative, Microsoft rev 1.00) |
+| DOS packets — what each `ACTION_*` receives and must return | `<AmigaDOS>` chapter 13, PDF pages 248–303 (section list on PDF pages 9–11) |
+| Handler startup, main loop, shutdown | `<AmigaDOS>` §12.1, from PDF page 208 |
+| Mount, device list, `DosEnvec` keywords | `<AmigaDOS>` chapter 7, PDF pages 94–127 |
 | `FileSystem.resource` / `FileSysEntry` / `fse_PatchFlags` | `<NDK3.2>/Autodocs/filesysres.doc` |
 | What a current 3.2 file system is expected to do | `<NDK3.2>/ReleaseNotes/FastFileSystem-RelNotes`, `DOS-RelNotes` |
 | Device command set (`TD64`, `NSD`) | `<NDK3.2>/Autodocs/trackdisk.doc`, `scsidisk.doc` |
