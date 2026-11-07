@@ -46,7 +46,10 @@ LD      = $(PREFIX)/bin/m68k-amigaos-ld
 
 # The authoritative OS API source for this workspace is the NDK 3.2 tree
 # under docs/, not whatever the compiler ships (see the root CLAUDE.md).
-WORKSPACE = ../../..
+# the NDK 3.2 headers and ApolloLib live in the docs/ of ApolloClaude
+# (override on the command line: make APOLLODOCS=<folder holding docs/>)
+APOLLODOCS = $(HOME)/ApolloClaude
+WORKSPACE = $(APOLLODOCS)
 NDK       = $(WORKSPACE)/docs/os/NDK/NDK3.2/Include_H
 APOLLOLIB = $(WORKSPACE)/docs/toolchain/_ApolloLib
 LIBEXFAT  = ../libexfat

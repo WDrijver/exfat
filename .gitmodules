@@ -1,0 +1,3 @@
+[submodule "ApolloKnowledgeBase"]
+	path = ApolloKnowledgeBase
+	url = https://github.com/ApolloTeam-dev/ApolloKnowledgeBase
