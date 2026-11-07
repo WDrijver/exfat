@@ -33,7 +33,7 @@
    not printf-compatible (it wants %ld where C wants %d). */
 
 #include <proto/exec.h>
-#include "ApolloCrossDev_Debug.h"	/* docs/toolchain/_ApolloLib, via -I */
+#include "ApolloCrossDev_Debug.h"	/* ApolloCrossDev Projects/ApolloLib, via -I */
 
 /* A ROM-resident handler may have no writable static data at all.  The
    counter is only ever read by fsck and dump, neither of which is part of

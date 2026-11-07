@@ -39,7 +39,7 @@ baud (~11.5 KB/s) and `bug_print()` wraps each message in `Forbid()`, so a
 At TRACE level every packet logs a line, so mounting several partitions while
 Workbench probes them can spend seconds in `Forbid()`. Use `DEBUG=6` unless
 you are actively debugging. Diagnostics go out
-of the serial port via `docs/toolchain/_ApolloLib/ApolloCrossDev_Debug.c`,
+of the serial port via ApolloLib's `ApolloCrossDev_Debug.c` (in ApolloCrossDev),
 the same facility sagasd.device uses — watch them with a serial terminal.
 
 ## Installing

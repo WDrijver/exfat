@@ -44,14 +44,12 @@ PREFIX  = $(HOME)/ApolloCrossDev/Compilers/GCC-6.50-Dev
 CC      = $(PREFIX)/bin/m68k-amigaos-gcc
 LD      = $(PREFIX)/bin/m68k-amigaos-ld
 
-# The authoritative OS API source for this workspace is the NDK 3.2 tree
-# under docs/, not whatever the compiler ships (see the root CLAUDE.md).
-# the NDK 3.2 headers and ApolloLib live in the docs/ of ApolloClaude
-# (override on the command line: make APOLLODOCS=<folder holding docs/>)
-APOLLODOCS = $(HOME)/ApolloClaude
-WORKSPACE = $(APOLLODOCS)
-NDK       = $(WORKSPACE)/docs/os/NDK/NDK3.2/Include_H
-APOLLOLIB = $(WORKSPACE)/docs/toolchain/_ApolloLib
+# NDK 3.2 headers and ApolloLib come from ApolloCrossDev (see the knowledge
+# base, toolchain/target-os-headers.md and toolchain/apollolib/).  A fresh
+# install has ndk32-include/Include_H; older installs have ndk-include.
+# Override on the command line: make NDK=<dir> APOLLOLIB=<dir>
+NDK       = $(firstword $(wildcard $(PREFIX)/m68k-amigaos/ndk32-include/Include_H) $(PREFIX)/m68k-amigaos/ndk-include)
+APOLLOLIB = $(HOME)/ApolloCrossDev/Projects/ApolloLib
 LIBEXFAT  = ../libexfat
 MKFS      = ../mkfs
 
